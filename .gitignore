@@ -1,0 +1,10 @@
+target/
+.maven-cache/
+.idea/
+*.iml
+.classpath
+.project
+.settings/
+*.log
+.env
+application-local.yml
