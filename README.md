@@ -6,7 +6,7 @@
 
 ## 已实现
 
-- 贷款合同、还款计划、还款记录三张表，H2 + MyBatis-Plus 持久化；
+- H2 作为默认开发/测试数据库，MySQL 8.0 作为可选运行 Profile；两者共用 MyBatis-Plus 和 Flyway 迁移；
 - `BigDecimal` 金额计算和可注入 `Clock`；
 - `GET /api/loans/{loanNo}/status` 确定性查询接口；
 - 3 个只读 Tool：`getCurrentRepayment`、`getOverdueDiagnosis`、`getSettlementStatus`；
@@ -84,6 +84,39 @@ Invoke-RestMethod `
 
 如果 Java 访问模型 API 需要本机代理，见 [Demo 文档](docs/DEMO.md) 中的 JVM 代理说明。
 
+## MySQL + Flyway
+
+默认启动仍使用内存 H2，方便快速开发和测试。需要验证真实 MySQL 路径时，用 Docker Compose 启动 MySQL 8.0：
+
+```powershell
+docker compose up -d mysql
+
+$env:SPRING_PROFILES_ACTIVE = "mysql"
+$env:SERVER_PORT = "18080"
+
+mvn spring-boot:run
+```
+
+默认连接 `127.0.0.1:3307/loanops`。本地账号配置见 `.env.example`，可以用同名环境变量覆盖。
+
+数据库结构不再由 `schema.sql` / `data.sql` 隐式初始化，而是由 Flyway 版本化管理：
+
+```text
+V1__create_loan_schema.sql   # 建表、唯一约束、外键
+V2__seed_demo_data.sql       # LN-10001 / 10002 / 10003 演示数据
+```
+
+启动时 Flyway 会先校验并执行未应用的 migration，再由 MyBatis-Plus 访问数据库。重复启动时不会重复执行已经成功的版本。
+
+一键验证真实 MySQL 路径：
+
+```powershell
+.\scripts\verify-mysql.ps1
+```
+
+脚本会启动 MySQL、在 `mysql` Profile 下跑完整测试、启动实际 JAR、检查 `LN-10002` 的 REST 结果，并核对 `flyway_schema_history`。
+
+`mysql` Profile 当前用于本地 Demo / 集成测试；其中 `useSSL=false` 和默认开发密码不是生产环境配置。
 ## 架构
 
 ```mermaid
@@ -99,7 +132,7 @@ graph TD
     StatusService --> Diagnosis["LoanDiagnosisService"]
     Diagnosis --> Calculator["RepaymentCalculator"]
     StatusService --> Mapper["MyBatis-Plus Mappers"]
-    Mapper --> Database["H2"]
+    Mapper --> Database["H2 / MySQL"]
 ```
 
 依赖方向只有一条：Agent / Tool 可以调用业务服务，但不能直接访问 Mapper，也不能重新实现贷款计算。
@@ -114,7 +147,7 @@ graph TD
 | `LN-10002` | 为什么逾期 | 剩余 `3500`，在业务日 `2026-08-23` 时逾期 `3` 天 |
 | `LN-10003` | 是否已经结清 | `settled=true`，未偿金额 `0` |
 
-这些数据来自 `src/main/resources/data.sql`，只用于 Demo 和测试，不代表真实银行完整业务规则。
+这些数据由 Flyway 的 `V2__seed_demo_data.sql` 写入，只用于 Demo 和测试，不代表真实银行完整业务规则。
 
 ## 业务规则放在哪里
 

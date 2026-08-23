@@ -25,7 +25,7 @@ graph LR
     StatusService --> Diagnosis["LoanDiagnosisService"]
     Diagnosis --> Calculator["RepaymentCalculator"]
     StatusService --> Mapper["MyBatis-Plus Mappers"]
-    Mapper --> Database["H2"]
+    Mapper --> Database["H2 / MySQL"]
 ```
 
 ## 3. 各层职责
@@ -103,10 +103,16 @@ DeepSeek Qwen GLM
 
 ## 8. 数据库扩展点
 
-当前 `LoanStatusService` 直接依赖 MyBatis Mapper，对这个小型服务足够简单。若未来同时支持 H2、MySQL、外部信贷 API 等多种数据源，再引入 Repository Port / Adapter 更合适。
+当前持久化有两条经过验证的运行路径：
 
-当前不提前增加抽象层，原因是：只有一种持久化实现时，额外接口不会带来真实替换收益，反而增加样板代码。
+- 默认 Profile：H2 内存数据库，用于快速开发和测试；
+- `mysql` Profile：MySQL 8.0，用于本地 Docker 和 CI 集成验证。
 
+两条路径共享同一套 MyBatis-Plus Mapper 和 Flyway migration。数据库结构只有一个版本来源，不再同时维护 H2 `schema.sql` 和 MySQL DDL。
+
+这里暂时不额外引入 Repository Port / Adapter。原因是 H2 和 MySQL 都通过同一 JDBC / MyBatis 持久化契约访问，现有 `LoanStatusService -> Mapper` 没有因为切库而产生业务分支。只有未来同时接 MySQL、外部贷款 API 或其他异构数据源时，再增加 Repository 抽象才有实际收益。
+
+`V2__seed_demo_data.sql` 是本项目为了可复现演示保留的固定数据；`mysql` Profile 当前定位为本地 Demo / 集成测试配置，不应直接当成生产数据库配置。
 ## 9. 写操作边界
 
 当前 Agent 没有写 Tool，因此安全边界是结构性的，而不只是 Prompt 约束。

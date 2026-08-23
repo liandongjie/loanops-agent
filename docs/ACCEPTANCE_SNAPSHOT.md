@@ -61,3 +61,15 @@ Qwen / GLM 尚未完成当前项目的真实 E2E，因此不计入已支持 Prov
 ## Phase 5 resume-ready verification
 
 2026-08-23 本地重新执行 scripts/verify-resume-mvp.ps1 -WithAi，结果为 PASS。验收同时覆盖固定业务日期、三笔确定性贷款案例、真实 DeepSeek Tool Calling、不存在贷款以及写操作拒绝。
+## MySQL / Flyway verification
+
+2026-08-23 本地使用 Docker MySQL 8.0 重新验证持久化路径：
+
+- `mysql` Profile 下 `mvn clean verify`：25 tests，0 failures，0 errors；
+- 空数据库启动时 Flyway 成功应用 V1 / V2，schema version 到 2；
+- 后续 Spring Context 再启动时显示 schema 已是 version 2，无重复 migration；
+- `PersistenceConstraintIntegrationTest` 在真实 MySQL 下通过，组合外键与期次唯一约束有效；
+- 实际 JAR 使用 MySQL 启动后，`LN-10002` 返回 8500 / 5000 / 3500、逾期 3 天；
+- `flyway_schema_history` 中 V1 / V2 均为 success。
+
+本阶段仍保留 H2 作为默认快速测试数据库，MySQL 不改变 Java Domain、Tool 或 Agent 的业务规则。
