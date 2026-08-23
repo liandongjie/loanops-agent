@@ -13,23 +13,19 @@ LoanOps Agent 的核心不是组件数量，而是把“确定性金融事实”
 ## 2. 当前运行链路
 
 ```mermaid
-flowchart LR
-    C[Client] -->|GET loan status| REST[LoanStatusController]
-    C -->|POST natural language| AGENT[AgentController]
-
-    AGENT --> AIS[LoanOpsAgentService]
-    AIS --> CHAT[Spring AI ChatClient]
-    CHAT --> MODEL[DeepSeek ChatModel]
-    MODEL --> CALL[Tool Calling]
-
-    CALL --> TOOLS[LoanOpsTools]
-    TOOLS --> STATUS[LoanStatusService]
-    REST --> STATUS
-
-    STATUS --> DIAG[LoanDiagnosisService]
-    DIAG --> CALC[RepaymentCalculator]
-    STATUS --> MAPPER[MyBatis-Plus Mappers]
-    MAPPER --> DB[(H2)]
+graph LR
+    Client["API Client"] --> Rest["LoanStatusController"]
+    Client --> Agent["AgentController"]
+    Agent --> AgentService["LoanOpsAgentService"]
+    AgentService --> ChatClient["Spring AI ChatClient"]
+    ChatClient --> Model["DeepSeek"]
+    Model --> Tools["LoanOpsTools"]
+    Tools --> StatusService["LoanStatusService"]
+    Rest --> StatusService
+    StatusService --> Diagnosis["LoanDiagnosisService"]
+    Diagnosis --> Calculator["RepaymentCalculator"]
+    StatusService --> Mapper["MyBatis-Plus Mappers"]
+    Mapper --> Database["H2"]
 ```
 
 ## 3. 各层职责
