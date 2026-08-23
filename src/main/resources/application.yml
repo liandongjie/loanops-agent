@@ -6,7 +6,12 @@ spring:
     password:
   sql:
     init:
-      mode: always
+      mode: never
+  flyway:
+    enabled: true
+    locations: classpath:db/migration
+    validate-on-migrate: true
+    clean-disabled: true
   ai:
     model:
       chat: none

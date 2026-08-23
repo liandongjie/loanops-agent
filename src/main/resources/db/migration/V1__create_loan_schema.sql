@@ -1,7 +1,3 @@
-DROP TABLE IF EXISTS payment_record;
-DROP TABLE IF EXISTS repayment_plan;
-DROP TABLE IF EXISTS loan_contract;
-
 CREATE TABLE loan_contract (
     id BIGINT PRIMARY KEY,
     loan_no VARCHAR(64) NOT NULL UNIQUE,
