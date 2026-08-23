@@ -17,10 +17,13 @@ graph LR
     Client["API Client"] --> Rest["LoanStatusController"]
     Client --> Agent["AgentController"]
     Agent --> AgentService["LoanOpsAgentService"]
-    AgentService --> ChatClient["Spring AI ChatClient"]
+    AgentService --> Gateway["AgentChatGateway"]
+    Gateway --> ChatClient["Spring AI ChatClient"]
     ChatClient --> Model["DeepSeek"]
     Model --> Tools["LoanOpsTools"]
     Tools --> StatusService["LoanStatusService"]
+    AgentService --> Audit["AgentAuditService"]
+    Audit --> AuditTables["Audit tables"]
     Rest --> StatusService
     StatusService --> Diagnosis["LoanDiagnosisService"]
     Diagnosis --> Calculator["RepaymentCalculator"]
@@ -37,7 +40,7 @@ graph LR
 | `LoanStatusService` | 加载贷款数据并编排诊断 | 重新实现领域算法 |
 | `LoanStatusController` | 暴露确定性 REST API | 金额/逾期计算 |
 | `LoanOpsTools` | 把 Service 暴露成 3 个只读 AI Tool | 直接访问 Mapper、写数据库 |
-| `LoanOpsAgentService` | 系统约束、ChatClient、Tool Calling | 计算金融事实 |
+| `LoanOpsAgentService` | 请求关联、审计生命周期、Chat gateway、Tool Calling 编排 | 计算金融事实 |
 | Provider | 语言理解与回答生成 | 成为业务事实来源 |
 
 ## 4. 事实来源
@@ -60,7 +63,7 @@ LoanStatusService
 
 ## 5. 数据模型
 
-当前只有三张表：
+贷款业务核心仍只有三张表；审计另有两张独立表：
 
 ```text
 loan_contract
@@ -69,7 +72,12 @@ loan_contract
     └── n repayment_plan
               1
               │
-              └── n payment_record
+            └── n payment_record
+
+agent_audit_log
+    1
+    │
+    └── n agent_tool_audit_log
 ```
 
 `OVERDUE`、`SETTLED` 不作为持久化真相保存，而是根据计划与还款记录动态计算，避免派生状态和基础数据不一致。
@@ -91,6 +99,8 @@ Agent 依赖 Spring AI `ChatClient`，而不是在业务类中调用某个厂商
 
 ```text
 LoanOpsAgentService
+       ↓
+ AgentChatGateway
        ↓
    ChatClient
        ↓
@@ -118,3 +128,22 @@ DeepSeek Qwen GLM
 当前 Agent 没有写 Tool，因此安全边界是结构性的，而不只是 Prompt 约束。
 
 未来如果增加任何写操作，不能简单加入 `defaultTools`。至少需要单独设计：权限、显式确认、幂等、审计、失败恢复和按请求授权。在这些机制完成前，Agent 保持只读。
+
+## 10. Agent 审计与 Observability
+
+Audit 与运行时 Observability 分层：Audit 负责请求和 Tool 顺序的可追溯，落在 Flyway V3
+的两张表；Micrometer/Actuator 和 Spring AI 内建 observations 负责指标与框架观测。
+审计 begin 在 ChatClient/模型调用前以独立事务提交，远程模型调用不包在数据库事务中，避免长事务；
+begin 失败时 fail-closed，不发起模型调用。
+
+默认不保存 prompt、completion 或 Tool result 原文，只保存长度和 SHA-256 指纹；指纹用于完整性和关联，
+不代表匿名化。业务指标只使用 outcome、tool 等低基数 tag，不使用 requestId、loanNo 或内容。
+MDC 与请求上下文在 finally 清理；直接调用 Tool 没有 request context 时仍正常工作。
+`GET /api/agent/audits/{requestId}` 是无 RBAC 的本地 Demo/验收接口，生产环境不得裸露。
+
+
+HTTP correlation 由 `AgentRequestCorrelationFilter` 负责。Filter 在 MVC JSON 反序列化之前生成服务端 UUID，写入 `X-Request-Id`、request attribute 和 MDC；因此 malformed JSON 也能关联日志。客户端传入的 `X-Request-Id` 不作为审计 id，服务端始终重新生成。malformed body 没有形成合法 Agent message，所以只保留 transport correlation，不伪造 Agent Audit；空白 message 已进入 Agent 语义，会持久化为 `FAILED`。
+
+Agent message 不做隐式 `trim`，SHA-256 指纹对应真正传入 ChatClient 的字符串。Agent/Tool 的 `STARTED` 都先用 `REQUIRES_NEW` 短事务提交，再执行远程模型或 Tool；Tool 的 `STARTED` 写入失败时同样 fail-closed，不执行该 Tool。`agent_tool_audit_log` 使用 `(request_id, sequence_no)` 复合主键，因此持久层使用显式 MyBatis SQL，不暴露错误的单主键 `BaseMapper` 语义。
+
+自定义指标只使用有限白呕 tag：outcome、Tool 名和 audit operation，未知值统一折叠为 `unknown`。Spring AI ChatClient/ChatModel 的 prompt、completion、error logging 以及 Tool content observation 都显式关闭。当前 request context 基于 Servlet/ChatClient 同步调用链的 ThreadLocal；如果以后改成 reactive/async，需要替换为显式 context propagation，不能直接沿用。

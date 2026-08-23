@@ -104,6 +104,7 @@ mvn spring-boot:run
 ```text
 V1__create_loan_schema.sql   # 建表、唯一约束、外键
 V2__seed_demo_data.sql       # LN-10001 / 10002 / 10003 演示数据
+V3__create_agent_audit_tables.sql # Agent 请求与 Tool 审计表
 ```
 
 启动时 Flyway 会先校验并执行未应用的 migration，再由 MyBatis-Plus 访问数据库。重复启动时不会重复执行已经成功的版本。
@@ -117,6 +118,34 @@ V2__seed_demo_data.sql       # LN-10001 / 10002 / 10003 演示数据
 脚本会启动 MySQL、在 `mysql` Profile 下跑完整测试、启动实际 JAR、检查 `LN-10002` 的 REST 结果，并核对 `flyway_schema_history`。
 
 `mysql` Profile 当前用于本地 Demo / 集成测试；其中 `useSSL=false` 和默认开发密码不是生产环境配置。
+
+## Agent 审计与可观测性
+
+Agent Audit 与运行时 Observability 分开：审计写入 Flyway V3 创建的
+`agent_audit_log` / `agent_tool_audit_log`，用于按 request id 追溯请求和 Tool 顺序；
+Micrometer、Actuator 和 Spring AI observations 负责运行时指标与框架观测。
+
+默认 `loanops.audit.include-content=false`，只保存 message/answer 的长度和 SHA-256 指纹，
+不保存完整原文。SHA-256 只是完整性/关联指纹，不是匿名化；明确开启配置才保存原文。
+Spring AI prompt、completion、Tool arguments 和 Tool results 默认不导出到 observations。
+
+`POST /api/agent/chat` 的 request id 由 Servlet Filter 在 Controller 和 JSON 反序列化之前生成，并写入 `X-Request-Id`、request attribute 与 MDC。
+因此 malformed JSON 也能拿到 transport correlation id；客户端传入的 `X-Request-Id` 不会被信任，服务端始终生成自己的 UUID。只有成功解析为 Agent message 的请求才创建 Agent Audit。
+空白 message 会先写入 `STARTED`，再以 `FAILED / InvalidAgentMessageException` 结束，且不会调用模型。
+
+Audit 对原始 message 计算长度和 SHA-256，不会在进入 ChatClient 前偷偷 `trim`。Micrometer tag 只接受有限的 outcome / Tool / audit-operation 值，其他值统一归为 `unknown`，避免 requestId、loanNo 等高基数字段进入时序指标。
+
+响应中的 `X-Request-Id` 可以直接用于查询本次 Agent 审计：
+
+```text
+GET /api/agent/audits/{requestId}
+GET /actuator/health
+GET /actuator/info
+GET /actuator/prometheus
+```
+
+审计查询是当前无 RBAC 的本地 Demo/验收接口，生产环境不能裸露。审计状态只表达技术结果
+`STARTED` / `SUCCESS` / `FAILED`，不会从自然语言回答猜测业务拒绝结论。
 ## 架构
 
 ```mermaid
@@ -124,7 +153,8 @@ graph TD
     Client["API Client"] --> Rest["LoanStatusController"]
     Client --> Agent["AgentController"]
     Agent --> AgentService["LoanOpsAgentService"]
-    AgentService --> ChatClient["Spring AI ChatClient"]
+    AgentService --> Gateway["AgentChatGateway"]
+    Gateway --> ChatClient["Spring AI ChatClient"]
     ChatClient --> Model["DeepSeek"]
     Model --> Tools["LoanOpsTools"]
     Tools --> StatusService["LoanStatusService"]
@@ -133,6 +163,8 @@ graph TD
     Diagnosis --> Calculator["RepaymentCalculator"]
     StatusService --> Mapper["MyBatis-Plus Mappers"]
     Mapper --> Database["H2 / MySQL"]
+    AgentService --> Audit["AgentAuditService"]
+    Audit --> AuditTables["Audit tables"]
 ```
 
 依赖方向只有一条：Agent / Tool 可以调用业务服务，但不能直接访问 Mapper，也不能重新实现贷款计算。
@@ -170,7 +202,8 @@ Tool 不计算金额，只调用已有服务；Prompt 里也不复制这些公�
 mvn clean verify
 ```
 
-当前基线是 `23` 个测试，覆盖 Domain、数据库约束、REST、Tool、Agent Controller 和时间配置。
+测试覆盖 Domain、数据库约束、REST、Tool、Agent、审计和 Observability；请以当前工作树实际执行的
+`mvn clean verify` 结果为准。
 
 一键跑固定业务案例：
 
