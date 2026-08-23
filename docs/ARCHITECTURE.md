@@ -1,491 +1,118 @@
-# LoanOps Agent — Architecture
+# Architecture
 
-## 1. 架构目标
+## 1. 设计目标
 
-本项目的架构不是追求组件数量，而是保证：
+LoanOps Agent 的核心不是组件数量，而是把“确定性金融事实”和“概率型自然语言能力”分开。
 
-1. Java 是核心；
-2. 金融业务逻辑确定、可测试；
-3. AI 只位于最外层；
-4. 业务逻辑只有一个事实来源；
-5. Agent Tool 全部只读；
-6. 每一层可以单独验证；
-7. 1–2 天内可形成 Resume MVP。
+- Java 领域层拥有金额、日期、逾期和结清规则；
+- REST 可以绕过 AI 独立验证业务事实；
+- Tool 只是业务能力的只读适配器；
+- Agent 只负责意图理解、Tool 选择和解释；
+- 数据库和模型 Provider 都属于可替换基础设施，不应改写核心业务算法。
 
----
+## 2. 当前运行链路
 
-## 2. 核心架构原则
+```mermaid
+flowchart LR
+    C[Client] -->|GET loan status| REST[LoanStatusController]
+    C -->|POST natural language| AGENT[AgentController]
 
-### Principle 1：Java 算，AI 说
+    AGENT --> AIS[LoanOpsAgentService]
+    AIS --> CHAT[Spring AI ChatClient]
+    CHAT --> MODEL[DeepSeek ChatModel]
+    MODEL --> CALL[Tool Calling]
 
-金融事实由 Java 计算：
+    CALL --> TOOLS[LoanOpsTools]
+    TOOLS --> STATUS[LoanStatusService]
+    REST --> STATUS
 
-- 应还金额；
-- 已还金额；
-- 未还金额；
-- 当前待处理期次；
-- 是否逾期；
-- 逾期天数；
-- 是否结清。
-
-AI 只负责：
-
-- 理解问题；
-- 选择 Tool；
-- 使用 Tool 返回结果组织自然语言说明。
-
----
-
-### Principle 2：业务逻辑只能存在一份
-
-业务规则只能位于确定性的 Java Domain / Service 层。
-
-禁止：
-
-- Controller 重复计算；
-- Tool 重复计算；
-- Prompt 重复计算；
-- Agent 自行计算；
-- Repository 承担业务判断。
-
----
-
-### Principle 3：AI Tool 全部只读
-
-所有 Tool 仅提供查询/诊断能力。
-
-Tool 不得：
-
-- 写数据库；
-- 修改贷款；
-- 修改还款计划；
-- 创建还款记录；
-- 更新状态；
-- 执行任何金融动作。
-
----
-
-### Principle 4：先验证 Java，再验证 Agent
-
-必须保留普通 REST 查询能力，使开发者可以不经过 AI 验证 Java 业务结果。
-
-这样出现问题时可快速区分：
-
-```text
-Java Domain 错误
+    STATUS --> DIAG[LoanDiagnosisService]
+    DIAG --> CALC[RepaymentCalculator]
+    STATUS --> MAPPER[MyBatis-Plus Mappers]
+    MAPPER --> DB[(H2)]
 ```
 
-还是：
-
-```text
-Agent / Tool Calling 错误
-```
-
----
-
-## 3. MVP 逻辑架构
-
-```text
-                 ┌─────────────────────┐
-                 │ Swagger / Postman   │
-                 └──────────┬──────────┘
-                            │
-               ┌────────────┴─────────────┐
-               │                          │
-               ▼                          ▼
-      LoanStatusController        AgentController
-               │                 POST /api/agent/chat
-               │                          │
-               ▼                          ▼
-       LoanDiagnosisService       LoanOpsAgentService
-               │                          │
-               │                    Spring AI ChatClient
-               │                          │
-               │                    Tool Calling
-               │             ┌────────────┼────────────┐
-               │             ▼            ▼            ▼
-               │      CurrentRepay-  Overdue-     Settlement-
-               │      mentTool       Diagnosis    StatusTool
-               │             │            │            │
-               └─────────────┴────────────┴────────────┘
-                                      │
-                                      ▼
-                             LoanDiagnosisService
-                                      │
-                                      ▼
-                            RepaymentCalculator
-                                      │
-                                      ▼
-                            Mapper / Repository
-                                      │
-                                      ▼
-                                     H2
-```
-
----
-
-## 4. 推荐代码分层
-
-最终包结构可以按职责组织，例如：
-
-```text
-src/main/java/.../loanops/
-├── LoanOpsApplication.java
-├── config/
-├── controller/
-├── domain/
-├── dto/
-├── mapper/
-├── service/
-├── agent/
-└── tool/
-```
-
-推荐职责：
-
-### `domain/`
-
-保存核心领域对象：
-
-- `LoanContract`
-- `RepaymentPlan`
-- `PaymentRecord`
-
-不包含 Spring AI 逻辑。
-
----
-
-### `service/`
-
-至少包含：
-
-- `RepaymentCalculator`
-- `LoanDiagnosisService`
-
-负责全部确定性业务规则。
-
----
-
-### `mapper/`
-
-负责 H2 数据读写。
-
-Mapper 不负责计算：
-
-- overdue；
-- outstanding；
-- settled。
-
----
-
-### `controller/`
-
-普通 REST Controller。
-
-作用：
-
-- 调用 Service；
-- 返回 DTO；
-- 支持无 AI 验证。
-
-Controller 不实现业务计算。
-
----
-
-### `tool/`
-
-只读 Spring AI Tools。
-
-MVP 固定 3 个能力：
-
-```text
-getCurrentRepayment(loanNo)
-getOverdueDiagnosis(loanNo)
-getSettlementStatus(loanNo)
-```
-
-每个 Tool 只调用现有 `LoanDiagnosisService`。
-
----
-
-### `agent/`
-
-负责：
-
-- Spring AI ChatClient；
-- 系统指令；
-- 注册 Tools；
-- 用户问题处理；
-- 返回自然语言诊断。
-
-Agent 不直接访问 Mapper。
-
----
-
-## 5. 依赖方向
-
-允许：
-
-```text
-Controller
-  ↓
-Service
-  ↓
-Mapper
-```
-
-允许：
-
-```text
-Agent
-  ↓
-Tool
-  ↓
-Service
-  ↓
-Mapper
-```
-
-禁止：
-
-```text
-Agent
-  ↓
-Mapper
-```
-
-禁止：
-
-```text
-Tool
-  ↓
-Mapper
-```
-
-禁止：
-
-```text
-Mapper
-  ↓
-Service
-```
-
-禁止循环依赖。
-
----
-
-## 6. 普通 REST API
-
-必须至少保留一个不经过 AI 的诊断入口。
-
-推荐：
-
-```http
-GET /api/loans/{loanNo}/status
-```
-
-该接口返回确定性业务结果。
-
-目的：
-
-1. 验证 Java 领域逻辑；
-2. 支持自动化测试；
-3. Agent 出错时可独立定位问题；
-4. 证明项目不是只有 LLM 封装。
-
----
-
-## 7. Agent API
-
-MVP 只需要一个自然语言入口：
-
-```http
-POST /api/agent/chat
-```
-
-请求示例：
-
-```json
-{
-  "message": "LN-10002 为什么逾期？"
-}
-```
-
-回答可以是自然语言，也可以在后续迭代中增加结构化字段。
-
-Stop Point A 不要求复杂会话管理。
-
----
-
-## 8. Tool 设计
-
-### 8.1 getCurrentRepayment
-
-职责：
-
-- 查询当前待处理期次；
-- 返回本金、利息、应还、已还、未还、到期日。
-
-不负责：
-
-- 生成自然语言答案；
-- 判断用户意图；
-- 修改数据。
-
----
-
-### 8.2 getOverdueDiagnosis
-
-职责：
-
-返回：
-
-- dueAmount；
-- paidAmount；
-- outstandingAmount；
-- dueDate；
-- asOfDate；
-- overdue；
-- overdueDays。
-
-业务计算必须来自 `LoanDiagnosisService`。
-
----
-
-### 8.3 getSettlementStatus
-
-职责：
-
-返回：
-
-- settled；
-- totalOutstanding；
-- 必要的还款计划汇总信息。
-
----
-
-## 9. 数据库策略
-
-### Resume MVP
-
-使用：
-
-```text
-H2
-```
-
-原因：
-
-- 零外部依赖；
-- clone 后快速运行；
-- 适合固定 Fixture；
-- 节省 1–2 天开发中的环境成本。
-
-### Future Work
-
-后续可以增加：
-
-```text
-application-mysql.yml
-```
-
-支持 MySQL。
-
-在 MySQL 未实际实现前，简历和 README 不得声称已使用 MySQL。
-
----
-
-## 10. 时间策略
-
-业务时间必须使用可注入 `Clock`。
-
-推荐：
-
-```text
-生产：system Clock
-测试：fixed Clock
-```
-
-核心 Case B 固定：
-
-```text
-2026-08-23
-```
-
-这样 `overdueDays = 3` 不会随着真实日期变化。
-
----
-
-## 11. AI 模型策略
-
-Resume MVP 只接入一个模型。
-
-优先：
-
-```text
-DeepSeek
-```
-
-通过 Spring AI 官方支持方式配置。
-
-不得在 MVP 中增加：
-
-- 多模型路由；
-- fallback 模型；
-- 动态模型切换；
-- 本地模型部署。
-
----
-
-## 12. 技术选型
-
-MVP：
-
-- Java 21
-- Spring Boot
-- Spring MVC
-- Spring AI
-- DeepSeek
-- MyBatis-Plus
-- H2
-- Maven
-- JUnit 5
-- Swagger / OpenAPI（如依赖兼容且引入成本低）
-
-金额：
-
-- BigDecimal
-
-日期：
-
-- LocalDate
-- Clock
-
----
-
-## 13. 架构演进原则
-
-Stop Point A 后，如新增 MySQL、MCP 或 Audit，应保证：
-
-```text
-Domain Service
-```
-
-无需因基础设施变化重写核心业务规则。
-
-例如：
-
-```text
-H2 Mapper
-   ↓
-未来替换/增加 MySQL
-```
-
-不应影响：
+## 3. 各层职责
+
+| 层 | 负责 | 不负责 |
+|---|---|---|
+| `RepaymentCalculator` | 应还、已还、未还的确定性金额计算 | 数据访问、LLM、HTTP |
+| `LoanDiagnosisService` | 当前期次、逾期、结清判断 | Mapper、Prompt |
+| `LoanStatusService` | 加载贷款数据并编排诊断 | 重新实现领域算法 |
+| `LoanStatusController` | 暴露确定性 REST API | 金额/逾期计算 |
+| `LoanOpsTools` | 把 Service 暴露成 3 个只读 AI Tool | 直接访问 Mapper、写数据库 |
+| `LoanOpsAgentService` | 系统约束、ChatClient、Tool Calling | 计算金融事实 |
+| Provider | 语言理解与回答生成 | 成为业务事实来源 |
+
+## 4. 事实来源
+
+业务规则只有一套实现路径：
 
 ```text
 RepaymentCalculator
+        ↓
 LoanDiagnosisService
+        ↓
+LoanStatusService
+      ↙     ↘
+   REST      Tool
+               ↓
+             Agent
 ```
 
-这保证核心业务逻辑与基础设施解耦。
+如果 REST 与 Agent 结果不一致，先用 REST / Service 测试验证 Java 事实，再排查 Tool Calling 或模型输出。这使 AI 故障和业务故障可以拆开定位。
+
+## 5. 数据模型
+
+当前只有三张表：
+
+```text
+loan_contract
+    1
+    │
+    └── n repayment_plan
+              1
+              │
+              └── n payment_record
+```
+
+`OVERDUE`、`SETTLED` 不作为持久化真相保存，而是根据计划与还款记录动态计算，避免派生状态和基础数据不一致。
+
+## 6. 时间与可复现性
+
+领域代码只从注入的 `Clock` 获取业务日期。默认使用系统日期；演示与验收可以通过：
+
+```text
+loanops.business-date=2026-08-23
+loanops.business-zone=Asia/Shanghai
+```
+
+生成固定 `Clock`，从而让 `LN-10002` 的 `overdueDays=3` 在未来仍可重复验证。
+
+## 7. Provider 扩展点
+
+Agent 依赖 Spring AI `ChatClient`，而不是在业务类中调用某个厂商 SDK。
+
+```text
+LoanOpsAgentService
+       ↓
+   ChatClient
+       ↓
+   ChatModel
+    /  |  \
+DeepSeek Qwen GLM
+```
+
+当前只把 DeepSeek 作为已接入、已验证 Provider。Qwen/GLM 后续应通过独立配置/Adapter 接入，并复用同一套 3 个 Tool 和 E2E Case。详见 `PROVIDERS.md`。
+
+## 8. 数据库扩展点
+
+当前 `LoanStatusService` 直接依赖 MyBatis Mapper，对这个小型服务足够简单。若未来同时支持 H2、MySQL、外部信贷 API 等多种数据源，再引入 Repository Port / Adapter 更合适。
+
+当前不提前增加抽象层，原因是：只有一种持久化实现时，额外接口不会带来真实替换收益，反而增加样板代码。
+
+## 9. 写操作边界
+
+当前 Agent 没有写 Tool，因此安全边界是结构性的，而不只是 Prompt 约束。
+
+未来如果增加任何写操作，不能简单加入 `defaultTools`。至少需要单独设计：权限、显式确认、幂等、审计、失败恢复和按请求授权。在这些机制完成前，Agent 保持只读。
