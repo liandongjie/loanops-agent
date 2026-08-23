@@ -1,5 +1,6 @@
 package com.loanops.tool;
 
+import com.loanops.audit.AgentToolAuditService;
 import com.loanops.dto.CurrentRepaymentFacts;
 import com.loanops.dto.OverdueDiagnosisFacts;
 import com.loanops.dto.SettlementStatusFacts;
@@ -12,9 +13,11 @@ import org.springframework.stereotype.Component;
 public class LoanOpsTools {
 
     private final LoanStatusService loanStatusService;
+    private final AgentToolAuditService toolAuditService;
 
-    public LoanOpsTools(LoanStatusService loanStatusService) {
+    public LoanOpsTools(LoanStatusService loanStatusService, AgentToolAuditService toolAuditService) {
         this.loanStatusService = loanStatusService;
+        this.toolAuditService = toolAuditService;
     }
 
     @Tool(
@@ -22,7 +25,8 @@ public class LoanOpsTools {
             description = "Read the deterministic current repayment facts for a loan. Use this for questions about the current installment, principal, interest, amount due, amount paid, remaining amount, due date, or whether the current installment is overdue.")
     public CurrentRepaymentFacts getCurrentRepayment(
             @ToolParam(description = "Loan number, for example LN-10001") String loanNo) {
-        return loanStatusService.getCurrentRepaymentFacts(loanNo);
+        return toolAuditService.execute(
+                "getCurrentRepayment", loanNo, () -> loanStatusService.getCurrentRepaymentFacts(loanNo));
     }
 
     @Tool(
@@ -30,7 +34,8 @@ public class LoanOpsTools {
             description = "Read the deterministic overdue diagnosis for a loan, including due date, business date, due amount, paid amount, outstanding amount, overdue flag, and overdue days. Do not use this tool to modify loan data.")
     public OverdueDiagnosisFacts getOverdueDiagnosis(
             @ToolParam(description = "Loan number, for example LN-10002") String loanNo) {
-        return loanStatusService.getOverdueDiagnosisFacts(loanNo);
+        return toolAuditService.execute(
+                "getOverdueDiagnosis", loanNo, () -> loanStatusService.getOverdueDiagnosisFacts(loanNo));
     }
 
     @Tool(
@@ -38,6 +43,7 @@ public class LoanOpsTools {
             description = "Read whether a loan is fully settled and its total outstanding amount. This tool is read-only and never changes loan status.")
     public SettlementStatusFacts getSettlementStatus(
             @ToolParam(description = "Loan number, for example LN-10003") String loanNo) {
-        return loanStatusService.getSettlementStatusFacts(loanNo);
+        return toolAuditService.execute(
+                "getSettlementStatus", loanNo, () -> loanStatusService.getSettlementStatusFacts(loanNo));
     }
 }

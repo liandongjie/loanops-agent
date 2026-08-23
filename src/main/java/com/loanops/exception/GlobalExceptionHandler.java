@@ -13,4 +13,16 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(new ApiError(HttpStatus.NOT_FOUND.value(), "LOAN_NOT_FOUND", exception.getMessage()));
     }
+
+    @ExceptionHandler(AgentAuditNotFoundException.class)
+    public ResponseEntity<ApiError> handleAgentAuditNotFound(AgentAuditNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError(HttpStatus.NOT_FOUND.value(), "AGENT_AUDIT_NOT_FOUND", exception.getMessage()));
+    }
+
+    @ExceptionHandler(InvalidAgentMessageException.class)
+    public ResponseEntity<ApiError> handleInvalidAgentMessage(InvalidAgentMessageException exception) {
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(new ApiError(HttpStatus.BAD_REQUEST.value(), "INVALID_AGENT_MESSAGE", exception.getMessage()));
+    }
 }

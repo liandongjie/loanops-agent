@@ -123,6 +123,12 @@ try {
     $historyText = $history -join "`n"
     Assert-True ($historyText -match '1:create loan schema:1') "Flyway V1 must be applied"
     Assert-True ($historyText -match '2:seed demo data:1') "Flyway V2 must be applied"
+    Assert-True ($historyText -match '3:create agent audit tables:1') "Flyway V3 must be applied"
+
+    $auditTables = docker compose exec -T -e MYSQL_PWD=$dbPassword mysql `
+        mysql -N "--user=$dbUser" "--database=$dbName" `
+        -e "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name IN ('agent_audit_log', 'agent_tool_audit_log');"
+    Assert-True ([int]($auditTables -join '').Trim() -eq 2) "V3 audit tables must exist"
 
     Write-Host "PASS: MySQL + Flyway verification completed."
 } finally {

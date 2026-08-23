@@ -13,3 +13,7 @@ spring:
           # Keep it configurable so a supported provider model can be changed without code changes.
           model: ${DEEPSEEK_MODEL:deepseek-chat}
           temperature: 0.2
+loanops:
+  agent:
+    provider: deepseek
+    model: ${DEEPSEEK_MODEL:deepseek-chat}

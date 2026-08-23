@@ -21,7 +21,7 @@ class FlywayMigrationIntegrationTest {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    void baselineMigrationsAreApplied() {
+    void requiredBaselineMigrationsAreAppliedWithoutBlockingFutureVersions() {
         assertThat(flyway.info().current()).isNotNull();
 
         assertThat(Arrays.stream(flyway.info().applied())
@@ -29,7 +29,7 @@ class FlywayMigrationIntegrationTest {
                 .filter(version -> version != null)
                 .map(Object::toString)
                 .toList())
-                .contains("1", "2");
+                .contains("1", "2", "3");
     }
 
     @Test
@@ -47,5 +47,13 @@ class FlywayMigrationIntegrationTest {
         assertThat(loanCount).isEqualTo(3);
         assertThat(planCount).isEqualTo(4);
         assertThat(paymentCount).isEqualTo(3);
+    }
+
+    @Test
+    void v3CreatesBothAuditTables() {
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT request_id FROM agent_audit_log WHERE 1 = 0")).isEmpty();
+        assertThat(jdbcTemplate.queryForList(
+                "SELECT request_id FROM agent_tool_audit_log WHERE 1 = 0")).isEmpty();
     }
 }

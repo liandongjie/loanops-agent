@@ -1,44 +1,146 @@
 package com.loanops.agent;
 
-import com.loanops.tool.LoanOpsTools;
-import org.springframework.ai.chat.client.ChatClient;
+import com.loanops.audit.AgentAuditHandle;
+import com.loanops.audit.AgentAuditService;
+import com.loanops.audit.AgentRequestAuditContext;
+import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.InvalidAgentMessageException;
+import com.loanops.observability.AgentMetrics;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.slf4j.MDC;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+
+import java.util.UUID;
 
 @Service
 @Profile("ai")
 public class LoanOpsAgentService {
 
-    private static final String SYSTEM_PROMPT = """
-            你是 LoanOps Agent，一个只读的贷款还款与逾期诊断助手。
+    private static final Logger log = LoggerFactory.getLogger(LoanOpsAgentService.class);
+    private static final String REQUEST_ID_MDC_KEY = "requestId";
 
-            必须遵守以下规则：
-            1. 所有与具体贷款有关的金额、日期、逾期天数、是否结清等事实，都必须来自提供的 Tool；不得凭常识、上下文或心算补全。
-            2. 不要自行进行金融金额或逾期天数计算。Java 服务已经提供确定性结果，你只负责选择合适的 Tool 并解释结果。
-            3. 查询“本期应还/已还/剩余/到期日”等当前还款信息时，使用 getCurrentRepayment。
-            4. 查询“为什么逾期/是否逾期/逾期几天”等问题时，使用 getOverdueDiagnosis。
-            5. 查询“是否结清/还剩多少未结清”等结清状态时，使用 getSettlementStatus。
-            6. 如果贷款不存在、Tool 报错或数据不足，要明确说明无法获得确定结论；不得编造贷款、还款或逾期事实。
-            7. 你没有任何写入权限。对于修改贷款、标记结清、创建还款记录、审批、核销或执行交易等请求，只能说明本 Agent 为只读诊断服务，不能执行该操作。
-            8. 回答使用简洁、清晰的中文。可以解释 Tool 返回的事实，但不得改变其数值和含义。
-            """;
+    private final AgentChatGateway chatGateway;
+    private final AgentAuditService auditService;
+    private final AgentMetrics metrics;
+    private final String provider;
+    private final String model;
 
-    private final ChatClient chatClient;
-
-    public LoanOpsAgentService(ChatClient.Builder chatClientBuilder, LoanOpsTools loanOpsTools) {
-        this.chatClient = chatClientBuilder
-                .defaultSystem(SYSTEM_PROMPT)
-                .defaultTools(loanOpsTools)
-                .build();
+    public LoanOpsAgentService(
+            AgentChatGateway chatGateway,
+            AgentAuditService auditService,
+            AgentMetrics metrics,
+            @Value("${loanops.agent.provider:unknown}") String provider,
+            @Value("${loanops.agent.model:unknown}") String model) {
+        this.chatGateway = chatGateway;
+        this.auditService = auditService;
+        this.metrics = metrics;
+        this.provider = provider;
+        this.model = model;
     }
 
-    public String chat(String message) {
-        if (message == null || message.isBlank()) {
-            throw new IllegalArgumentException("message must not be blank");
+    public AgentChatResult chat(String message) {
+        return chatWithRequestId(UUID.randomUUID().toString(), message);
+    }
+
+    public AgentChatResult chatWithRequestId(String requestId, String message) {
+        long requestStartedNanos = System.nanoTime();
+        String auditableMessage = message == null ? "" : message;
+        String previousRequestId = MDC.get(REQUEST_ID_MDC_KEY);
+        MDC.put(REQUEST_ID_MDC_KEY, requestId);
+
+        AgentAuditHandle auditHandle;
+        try {
+            // Fail closed: the remote Agent is never invoked unless STARTED is committed first.
+            auditHandle = auditService.begin(requestId, auditableMessage);
+        } catch (RuntimeException auditFailure) {
+            metrics.recordAuditWriteFailure("agent_begin");
+            metrics.recordRequest("AUDIT_FAILED", elapsedMillis(requestStartedNanos));
+            log.error("Agent audit begin failed requestId={} errorType={}",
+                    requestId, auditFailure.getClass().getSimpleName());
+            restoreRequestId(previousRequestId);
+            throw auditFailure;
         }
-        return chatClient.prompt()
-                .user(message.trim())
-                .call()
-                .content();
+
+        if (message == null || message.isBlank()) {
+            InvalidAgentMessageException validationFailure = new InvalidAgentMessageException();
+            return failBeforeModel(auditHandle, validationFailure, previousRequestId);
+        }
+
+        log.info("Agent request started requestId={} provider={} model={}", requestId, provider, model);
+        try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
+            String answer;
+            try {
+                answer = chatGateway.chat(message);
+            } catch (RuntimeException | Error modelFailure) {
+                long durationMs = auditService.elapsedMillis(auditHandle);
+                try {
+                    durationMs = auditService.completeFailure(auditHandle, modelFailure);
+                } catch (RuntimeException auditFailure) {
+                    metrics.recordAuditWriteFailure("agent_failure");
+                    modelFailure.addSuppressed(auditFailure);
+                    log.error("Agent failure audit completion failed requestId={} errorType={}",
+                            requestId, auditFailure.getClass().getSimpleName());
+                }
+                metrics.recordRequest("FAILED", durationMs);
+                log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                        requestId, provider, model, durationMs, modelFailure.getClass().getSimpleName());
+                throw modelFailure;
+            }
+
+            long durationMs;
+            try {
+                durationMs = auditService.completeSuccess(auditHandle, answer);
+            } catch (RuntimeException auditFailure) {
+                metrics.recordAuditWriteFailure("agent_success");
+                metrics.recordRequest("AUDIT_FAILED", auditService.elapsedMillis(auditHandle));
+                log.error("Agent success audit completion failed requestId={} errorType={}",
+                        requestId, auditFailure.getClass().getSimpleName());
+                throw auditFailure;
+            }
+
+            metrics.recordRequest("SUCCESS", durationMs);
+            log.info("Agent request completed requestId={} outcome=SUCCESS provider={} model={} durationMs={}",
+                    requestId, provider, model, durationMs);
+            return new AgentChatResult(requestId, answer);
+        } finally {
+            restoreRequestId(previousRequestId);
+        }
+    }
+
+    private AgentChatResult failBeforeModel(
+            AgentAuditHandle auditHandle,
+            InvalidAgentMessageException validationFailure,
+            String previousRequestId) {
+        long durationMs = auditService.elapsedMillis(auditHandle);
+        try {
+            durationMs = auditService.completeFailure(auditHandle, validationFailure);
+            log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                    auditHandle.requestId(), provider, model, durationMs,
+                    validationFailure.getClass().getSimpleName());
+        } catch (RuntimeException auditFailure) {
+            metrics.recordAuditWriteFailure("agent_failure");
+            validationFailure.addSuppressed(auditFailure);
+            log.error("Agent validation audit completion failed requestId={} errorType={}",
+                    auditHandle.requestId(), auditFailure.getClass().getSimpleName());
+        } finally {
+            metrics.recordRequest("FAILED", durationMs);
+            restoreRequestId(previousRequestId);
+        }
+        throw validationFailure;
+    }
+
+    private static long elapsedMillis(long startedNanos) {
+        return Math.max(0L, (System.nanoTime() - startedNanos) / 1_000_000L);
+    }
+
+    private static void restoreRequestId(String previousRequestId) {
+        if (previousRequestId == null) {
+            MDC.remove(REQUEST_ID_MDC_KEY);
+        } else {
+            MDC.put(REQUEST_ID_MDC_KEY, previousRequestId);
+        }
     }
 }
