@@ -4,7 +4,10 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.loanops.domain.LoanContract;
 import com.loanops.domain.PaymentRecord;
 import com.loanops.domain.RepaymentPlan;
+import com.loanops.dto.CurrentRepaymentFacts;
 import com.loanops.dto.LoanStatusResponse;
+import com.loanops.dto.OverdueDiagnosisFacts;
+import com.loanops.dto.SettlementStatusFacts;
 import com.loanops.exception.LoanNotFoundException;
 import com.loanops.persistence.entity.LoanContractEntity;
 import com.loanops.persistence.entity.PaymentRecordEntity;
@@ -41,6 +44,79 @@ public class LoanStatusService {
     }
 
     public LoanStatusResponse getStatus(String loanNo) {
+        DiagnosisSnapshot snapshot = diagnose(loanNo);
+        LoanDiagnosisService.RepaymentDiagnosis current = snapshot.current();
+
+        if (current == null) {
+            return new LoanStatusResponse(
+                    snapshot.loan().loanNo(), null, null, snapshot.asOfDate(), null, null, null,
+                    false, 0, snapshot.settlement().settled(), snapshot.settlement().totalOutstanding());
+        }
+
+        return new LoanStatusResponse(
+                snapshot.loan().loanNo(),
+                current.plan().installmentNo(),
+                current.plan().dueDate(),
+                current.asOfDate(),
+                current.dueAmount(),
+                current.paidAmount(),
+                current.outstandingAmount(),
+                current.overdue(),
+                current.overdueDays(),
+                snapshot.settlement().settled(),
+                snapshot.settlement().totalOutstanding());
+    }
+
+    public CurrentRepaymentFacts getCurrentRepaymentFacts(String loanNo) {
+        DiagnosisSnapshot snapshot = diagnose(loanNo);
+        LoanDiagnosisService.RepaymentDiagnosis current = snapshot.current();
+        if (current == null) {
+            return new CurrentRepaymentFacts(
+                    snapshot.loan().loanNo(), false, snapshot.settlement().settled(),
+                    null, null, null, null, null, null, null, false, 0);
+        }
+        return new CurrentRepaymentFacts(
+                snapshot.loan().loanNo(), true, snapshot.settlement().settled(),
+                current.plan().installmentNo(), current.plan().dueDate(),
+                current.plan().principalDue(), current.plan().interestDue(),
+                current.dueAmount(), current.paidAmount(), current.outstandingAmount(),
+                current.overdue(), current.overdueDays());
+    }
+
+    public OverdueDiagnosisFacts getOverdueDiagnosisFacts(String loanNo) {
+        DiagnosisSnapshot snapshot = diagnose(loanNo);
+        LoanDiagnosisService.RepaymentDiagnosis current = snapshot.current();
+        if (current == null) {
+            return new OverdueDiagnosisFacts(
+                    snapshot.loan().loanNo(), false, snapshot.settlement().settled(),
+                    null, snapshot.asOfDate(), null, null, null, false, 0);
+        }
+        return new OverdueDiagnosisFacts(
+                snapshot.loan().loanNo(), true, snapshot.settlement().settled(),
+                current.plan().dueDate(), current.asOfDate(),
+                current.dueAmount(), current.paidAmount(), current.outstandingAmount(),
+                current.overdue(), current.overdueDays());
+    }
+
+    public SettlementStatusFacts getSettlementStatusFacts(String loanNo) {
+        DiagnosisSnapshot snapshot = diagnose(loanNo);
+        return new SettlementStatusFacts(
+                snapshot.loan().loanNo(),
+                snapshot.settlement().settled(),
+                snapshot.settlement().totalOutstanding());
+    }
+
+    private DiagnosisSnapshot diagnose(String loanNo) {
+        LoanData data = loadLoanData(loanNo);
+        LoanDiagnosisService.RepaymentDiagnosis current =
+                loanDiagnosisService.currentRepayment(data.loan(), data.plans(), data.payments());
+        LoanDiagnosisService.SettlementDiagnosis settlement =
+                loanDiagnosisService.settlement(data.loan(), data.plans(), data.payments());
+        LocalDate asOfDate = current == null ? LocalDate.now(clock) : current.asOfDate();
+        return new DiagnosisSnapshot(data.loan(), current, settlement, asOfDate);
+    }
+
+    private LoanData loadLoanData(String loanNo) {
         LoanContractEntity loanEntity = loanContractMapper.selectOne(
                 new LambdaQueryWrapper<LoanContractEntity>().eq(LoanContractEntity::getLoanNo, loanNo));
         if (loanEntity == null) {
@@ -54,33 +130,10 @@ public class LoanStatusService {
                 new LambdaQueryWrapper<PaymentRecordEntity>()
                         .eq(PaymentRecordEntity::getLoanId, loanEntity.getId()));
 
-        LoanContract loan = toDomain(loanEntity);
-        List<RepaymentPlan> plans = planEntities.stream().map(this::toDomain).toList();
-        List<PaymentRecord> payments = paymentEntities.stream().map(this::toDomain).toList();
-
-        LoanDiagnosisService.RepaymentDiagnosis current =
-                loanDiagnosisService.currentRepayment(loan, plans, payments);
-        LoanDiagnosisService.SettlementDiagnosis settlement =
-                loanDiagnosisService.settlement(loan, plans, payments);
-
-        if (current == null) {
-            return new LoanStatusResponse(
-                    loan.loanNo(), null, null, LocalDate.now(clock), null, null, null,
-                    false, 0, settlement.settled(), settlement.totalOutstanding());
-        }
-
-        return new LoanStatusResponse(
-                loan.loanNo(),
-                current.plan().installmentNo(),
-                current.plan().dueDate(),
-                current.asOfDate(),
-                current.dueAmount(),
-                current.paidAmount(),
-                current.outstandingAmount(),
-                current.overdue(),
-                current.overdueDays(),
-                settlement.settled(),
-                settlement.totalOutstanding());
+        return new LoanData(
+                toDomain(loanEntity),
+                planEntities.stream().map(this::toDomain).toList(),
+                paymentEntities.stream().map(this::toDomain).toList());
     }
 
     private LoanContract toDomain(LoanContractEntity entity) {
@@ -99,5 +152,18 @@ public class LoanStatusService {
         return new PaymentRecord(
                 entity.getId(), entity.getLoanId(), entity.getRepaymentPlanId(),
                 entity.getPaymentDate(), entity.getAmount());
+    }
+
+    private record LoanData(
+            LoanContract loan,
+            List<RepaymentPlan> plans,
+            List<PaymentRecord> payments) {
+    }
+
+    private record DiagnosisSnapshot(
+            LoanContract loan,
+            LoanDiagnosisService.RepaymentDiagnosis current,
+            LoanDiagnosisService.SettlementDiagnosis settlement,
+            LocalDate asOfDate) {
     }
 }

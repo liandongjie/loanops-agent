@@ -7,6 +7,9 @@ spring:
   sql:
     init:
       mode: always
+  ai:
+    model:
+      chat: none
 
 mybatis-plus:
   configuration:
