@@ -26,6 +26,11 @@ public class AgentAuditLogEntity {
     private String messageText;
     private String answerText;
     private String errorType;
+    private String conversationId;
+    private Integer historyFromSequence;
+    private Integer historyToSequence;
+    private String historyHash;
+    private String systemPromptHash;
 
     public String getRequestId() { return requestId; }
     public void setRequestId(String requestId) { this.requestId = requestId; }
@@ -57,4 +62,14 @@ public class AgentAuditLogEntity {
     public void setAnswerText(String answerText) { this.answerText = answerText; }
     public String getErrorType() { return errorType; }
     public void setErrorType(String errorType) { this.errorType = errorType; }
+    public String getConversationId() { return conversationId; }
+    public void setConversationId(String conversationId) { this.conversationId = conversationId; }
+    public Integer getHistoryFromSequence() { return historyFromSequence; }
+    public void setHistoryFromSequence(Integer historyFromSequence) { this.historyFromSequence = historyFromSequence; }
+    public Integer getHistoryToSequence() { return historyToSequence; }
+    public void setHistoryToSequence(Integer historyToSequence) { this.historyToSequence = historyToSequence; }
+    public String getHistoryHash() { return historyHash; }
+    public void setHistoryHash(String historyHash) { this.historyHash = historyHash; }
+    public String getSystemPromptHash() { return systemPromptHash; }
+    public void setSystemPromptHash(String systemPromptHash) { this.systemPromptHash = systemPromptHash; }
 }
