@@ -29,7 +29,7 @@ class FlywayMigrationIntegrationTest {
                 .filter(version -> version != null)
                 .map(Object::toString)
                 .toList())
-                .contains("1", "2", "3");
+                .contains("1", "2", "3", "4");
     }
 
     @Test
@@ -55,5 +55,25 @@ class FlywayMigrationIntegrationTest {
                 "SELECT request_id FROM agent_audit_log WHERE 1 = 0")).isEmpty();
         assertThat(jdbcTemplate.queryForList(
                 "SELECT request_id FROM agent_tool_audit_log WHERE 1 = 0")).isEmpty();
+    }
+
+    @Test
+    void v4CreatesConversationTablesAndExtendsAgentAudit() {
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT conversation_id, created_at, updated_at, version, last_message_sequence
+                FROM conversation
+                WHERE 1 = 0
+                """)).isEmpty();
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT message_id, conversation_id, request_id, sequence_no, role, content, created_at
+                FROM conversation_message
+                WHERE 1 = 0
+                """)).isEmpty();
+        assertThat(jdbcTemplate.queryForList("""
+                SELECT conversation_id, history_from_sequence, history_to_sequence,
+                       history_hash, system_prompt_hash
+                FROM agent_audit_log
+                WHERE 1 = 0
+                """)).isEmpty();
     }
 }
