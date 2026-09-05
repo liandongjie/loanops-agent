@@ -44,6 +44,8 @@ management:
 loanops:
   audit:
     include-content: false
+  conversation:
+    history-message-limit: 20
 
 logging:
   pattern:
