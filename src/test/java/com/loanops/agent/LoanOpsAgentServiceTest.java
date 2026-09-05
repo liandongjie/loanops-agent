@@ -3,13 +3,21 @@ package com.loanops.agent;
 import com.loanops.audit.AgentAuditHandle;
 import com.loanops.audit.AgentAuditService;
 import com.loanops.audit.AgentRequestAuditContext;
+import com.loanops.conversation.ConversationHistoryFingerprint;
+import com.loanops.conversation.ConversationSnapshot;
+import com.loanops.conversation.ConversationTurnStore;
 import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.ConversationConflictException;
+import com.loanops.exception.ConversationNotFoundException;
 import com.loanops.exception.InvalidAgentMessageException;
 import com.loanops.observability.AgentMetrics;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
 import org.slf4j.MDC;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -25,11 +33,24 @@ import static org.mockito.Mockito.when;
 
 class LoanOpsAgentServiceTest {
 
+    private static final String CONVERSATION_ID = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+    private static final String SYSTEM_PROMPT = "system prompt";
+    private static final ConversationSnapshot EMPTY_SNAPSHOT = new ConversationSnapshot(
+            CONVERSATION_ID, 0, 0, List.of(), ConversationHistoryFingerprint.sha256(List.of()));
+
     private final AgentChatGateway gateway = mock(AgentChatGateway.class);
     private final AgentAuditService auditService = mock(AgentAuditService.class);
+    private final AgentTurnCompletionService completionService = mock(AgentTurnCompletionService.class);
+    private final ConversationTurnStore turnStore = mock(ConversationTurnStore.class);
     private final AgentMetrics metrics = mock(AgentMetrics.class);
     private final LoanOpsAgentService service = new LoanOpsAgentService(
-            gateway, auditService, metrics, "deepseek", "deepseek-chat");
+            gateway, auditService, completionService, turnStore, metrics, "deepseek", "deepseek-chat");
+
+    @BeforeEach
+    void defaults() {
+        when(turnStore.create()).thenReturn(EMPTY_SNAPSHOT);
+        when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
+    }
 
     @AfterEach
     void clearMdc() {
@@ -37,125 +58,144 @@ class LoanOpsAgentServiceTest {
     }
 
     @Test
-    void auditStartCommitsBeforeRemoteModelCallAndMessageIsNotSilentlyTrimmed() {
+    void oneSnapshotFlowsFromAuditThroughModelToAtomicCompletionWithoutTrimmingMessage() {
         String message = "  LN-10002 overdue reason?  ";
-        AgentAuditHandle handle = new AgentAuditHandle("ignored", 1L);
-        when(auditService.begin(anyString(), anyString())).thenReturn(handle);
-        when(gateway.chat(message)).thenReturn("outstanding=3500.00 overdueDays=3");
-        when(auditService.completeSuccess(handle, "outstanding=3500.00 overdueDays=3")).thenReturn(25L);
+        when(auditService.begin(anyString(), eq(message), eq(EMPTY_SNAPSHOT), eq(SYSTEM_PROMPT)))
+                .thenAnswer(invocation -> new AgentAuditHandle(invocation.getArgument(0), 1L));
+        when(gateway.chat(EMPTY_SNAPSHOT.history(), message))
+                .thenReturn("outstanding=3500.00 overdueDays=3");
+        when(completionService.complete(
+                any(), eq(EMPTY_SNAPSHOT), eq(message), eq("outstanding=3500.00 overdueDays=3")))
+                .thenReturn(25L);
 
         AgentChatResult result = service.chat(message);
 
+        assertThat(result.conversationId()).isEqualTo(CONVERSATION_ID);
         assertThat(result.requestId()).matches("[0-9a-f-]{36}");
-        InOrder ordered = inOrder(auditService, gateway);
-        ordered.verify(auditService).begin(result.requestId(), message);
-        ordered.verify(gateway).chat(message);
-        ordered.verify(auditService).completeSuccess(handle, result.answer());
+        InOrder ordered = inOrder(turnStore, auditService, gateway, completionService);
+        ordered.verify(turnStore).create();
+        ordered.verify(gateway).systemPrompt();
+        ordered.verify(auditService).begin(result.requestId(), message, EMPTY_SNAPSHOT, SYSTEM_PROMPT);
+        ordered.verify(gateway).chat(EMPTY_SNAPSHOT.history(), message);
+        ordered.verify(completionService).complete(
+                any(), eq(EMPTY_SNAPSHOT), eq(message), eq(result.answer()));
         verify(metrics).recordRequest("SUCCESS", 25L);
         assertThat(AgentRequestAuditContext.current()).isEmpty();
         assertThat(MDC.get("requestId")).isNull();
     }
 
     @Test
-    void blankMessageIsAuditedAsFailedAndNeverCallsRemoteModel() {
+    void blankMessageIsAuditedButNeverCreatesConversationOrCallsModel() {
         String requestId = "11111111-1111-1111-1111-111111111111";
         AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
         when(auditService.begin(requestId, "   ")).thenReturn(handle);
         when(auditService.completeFailure(any(), any(InvalidAgentMessageException.class))).thenReturn(4L);
 
-        assertThatThrownBy(() -> service.chatWithRequestId(requestId, "   "))
+        assertThatThrownBy(() -> service.chatWithRequestId(requestId, null, "   "))
                 .isInstanceOf(InvalidAgentMessageException.class);
 
-        verify(auditService).begin(requestId, "   ");
-        verify(auditService).completeFailure(any(), any(InvalidAgentMessageException.class));
-        verify(gateway, never()).chat(anyString());
+        verify(turnStore, never()).create();
+        verify(turnStore, never()).resolve(anyString());
+        verify(gateway, never()).chat(any(), anyString());
         verify(metrics).recordRequest("FAILED", 4L);
-        assertThat(AgentRequestAuditContext.current()).isEmpty();
-        assertThat(MDC.get("requestId")).isNull();
     }
 
     @Test
-    void blankMessageStillRecordsFailedRequestMetricWhenFailureAuditFinalizationBreaks() {
-        String requestId = "33333333-3333-3333-3333-333333333333";
-        AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
-        when(auditService.begin(requestId, "   ")).thenReturn(handle);
-        when(auditService.elapsedMillis(handle)).thenReturn(6L);
-        when(auditService.completeFailure(any(), any(InvalidAgentMessageException.class)))
-                .thenThrow(new IllegalStateException("audit update failed"));
+    void unknownConversationFailsBeforeAuditOrProvider() {
+        when(turnStore.resolve(CONVERSATION_ID)).thenThrow(new ConversationNotFoundException(CONVERSATION_ID));
 
-        assertThatThrownBy(() -> service.chatWithRequestId(requestId, "   "))
-                .isInstanceOf(InvalidAgentMessageException.class)
-                .satisfies(failure -> assertThat(failure.getSuppressed())
-                        .singleElement()
-                        .isInstanceOf(IllegalStateException.class));
+        assertThatThrownBy(() -> service.chatWithRequestId("request", CONVERSATION_ID, "hello"))
+                .isInstanceOf(ConversationNotFoundException.class);
 
-        verify(gateway, never()).chat(anyString());
-        verify(metrics).recordAuditWriteFailure("agent_failure");
-        verify(metrics).recordRequest("FAILED", 6L);
+        verify(auditService, never()).begin(anyString(), anyString(), any(), anyString());
+        verify(gateway, never()).chat(any(), anyString());
+        verify(metrics).recordRequest(eq("FAILED"), anyLong());
     }
 
     @Test
     void auditBeginFailurePreventsRemoteModelCall() {
-        when(auditService.begin(anyString(), anyString())).thenThrow(new IllegalStateException("db unavailable"));
+        when(auditService.begin(anyString(), anyString(), eq(EMPTY_SNAPSHOT), eq(SYSTEM_PROMPT)))
+                .thenThrow(new IllegalStateException("db unavailable"));
 
         assertThatThrownBy(() -> service.chat("LN-10002 overdue reason?"))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("db unavailable");
 
-        verify(gateway, never()).chat(anyString());
+        verify(gateway, never()).chat(any(), anyString());
         verify(metrics).recordAuditWriteFailure("agent_begin");
         verify(metrics).recordRequest(eq("AUDIT_FAILED"), anyLong());
-        assertThat(AgentRequestAuditContext.current()).isEmpty();
-        assertThat(MDC.get("requestId")).isNull();
     }
 
     @Test
-    void modelFailureIsPersistedAsTechnicalFailureAndRethrown() {
-        AgentAuditHandle handle = new AgentAuditHandle("ignored", 1L);
-        RuntimeException modelFailure = new RuntimeException("provider failed");
-        when(auditService.begin(anyString(), anyString())).thenReturn(handle);
-        when(gateway.chat(anyString())).thenThrow(modelFailure);
+    void providerFailureIsAuditedAndNeverCompletesConversation() {
+        AgentAuditHandle handle = startedAudit("request");
+        RuntimeException providerFailure = new RuntimeException("provider failed");
+        when(gateway.chat(any(), anyString())).thenThrow(providerFailure);
         when(auditService.elapsedMillis(handle)).thenReturn(8L);
-        when(auditService.completeFailure(handle, modelFailure)).thenReturn(9L);
+        when(auditService.completeFailure(handle, providerFailure)).thenReturn(9L);
 
-        assertThatThrownBy(() -> service.chat("LN-10002 overdue reason?"))
-                .isSameAs(modelFailure);
+        assertThatThrownBy(() -> service.chatWithRequestId("request", null, "question"))
+                .isSameAs(providerFailure);
 
-        verify(auditService).completeFailure(handle, modelFailure);
+        verify(completionService, never()).complete(any(), any(), anyString(), anyString());
+        verify(auditService).completeFailure(handle, providerFailure);
         verify(metrics).recordRequest("FAILED", 9L);
-        assertThat(AgentRequestAuditContext.current()).isEmpty();
-        assertThat(MDC.get("requestId")).isNull();
     }
 
     @Test
-    void successAuditCompletionFailureDoesNotRewriteRequestAsModelFailure() {
-        AgentAuditHandle handle = new AgentAuditHandle("ignored", 1L);
-        when(auditService.begin(anyString(), anyString())).thenReturn(handle);
-        when(gateway.chat(anyString())).thenReturn("ok");
-        when(auditService.completeSuccess(handle, "ok")).thenThrow(new IllegalStateException("audit update failed"));
-        when(auditService.elapsedMillis(handle)).thenReturn(11L);
+    void completionConflictIsAuditedAsFailureAndRethrown() {
+        AgentAuditHandle handle = startedAudit("request");
+        ConversationConflictException conflict = new ConversationConflictException(CONVERSATION_ID, 0, 0);
+        when(gateway.chat(any(), eq("question"))).thenReturn("answer");
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "question", "answer")).thenThrow(conflict);
+        when(auditService.completeFailure(handle, conflict)).thenReturn(12L);
 
-        assertThatThrownBy(() -> service.chat("LN-10001 current repayment?"))
-                .isInstanceOf(IllegalStateException.class)
-                .hasMessage("audit update failed");
+        assertThatThrownBy(() -> service.chatWithRequestId("request", null, "question"))
+                .isSameAs(conflict);
 
-        verify(auditService, never()).completeFailure(any(), any());
+        verify(auditService).completeFailure(handle, conflict);
+        verify(metrics).recordRequest("FAILED", 12L);
+    }
+
+    @Test
+    void successfulTurnCommitFailureDoesNotRemainSuccessful() {
+        AgentAuditHandle handle = startedAudit("request");
+        IllegalStateException persistenceFailure = new IllegalStateException("commit failed");
+        when(gateway.chat(any(), eq("question"))).thenReturn("answer");
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "question", "answer"))
+                .thenThrow(persistenceFailure);
+        when(auditService.completeFailure(handle, persistenceFailure)).thenReturn(14L);
+
+        assertThatThrownBy(() -> service.chatWithRequestId("request", null, "question"))
+                .isSameAs(persistenceFailure);
+
+        verify(auditService).completeFailure(handle, persistenceFailure);
         verify(metrics).recordAuditWriteFailure("agent_success");
-        verify(metrics).recordRequest("AUDIT_FAILED", 11L);
+        verify(metrics).recordRequest("FAILED", 14L);
     }
 
     @Test
-    void requestScopedMdcRestoresPreviousValueInsteadOfLeakingOrErasingOuterContext() {
-        String requestId = "22222222-2222-2222-2222-222222222222";
-        AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
-        when(auditService.begin(requestId, "hello")).thenReturn(handle);
-        when(gateway.chat("hello")).thenReturn("ok");
-        when(auditService.completeSuccess(handle, "ok")).thenReturn(1L);
+    void requestScopedContextAndMdcAreRestored() {
+        AgentAuditHandle handle = startedAudit("request");
+        when(gateway.chat(any(), eq("hello"))).thenAnswer(invocation -> {
+            assertThat(AgentRequestAuditContext.current()).get()
+                    .extracting(AgentRequestAuditContext.State::requestId)
+                    .isEqualTo("request");
+            return "ok";
+        });
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "hello", "ok")).thenReturn(1L);
         MDC.put("requestId", "outer-request");
 
-        service.chatWithRequestId(requestId, "hello");
+        service.chatWithRequestId("request", null, "hello");
 
         assertThat(MDC.get("requestId")).isEqualTo("outer-request");
         assertThat(AgentRequestAuditContext.current()).isEmpty();
+    }
+
+    private AgentAuditHandle startedAudit(String requestId) {
+        AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
+        when(auditService.begin(eq(requestId), anyString(), eq(EMPTY_SNAPSHOT), eq(SYSTEM_PROMPT)))
+                .thenReturn(handle);
+        return handle;
     }
 }

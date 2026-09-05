@@ -22,7 +22,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 class AgentObservabilityIntegrationTest {
 
     private static final Set<String> FORBIDDEN_HIGH_CARDINALITY_TAGS = Set.of(
-            "requestId", "request_id", "loanNo", "loan_no", "message", "prompt");
+            "requestId", "request_id", "conversationId", "conversation_id",
+            "loanNo", "loan_no", "message", "prompt");
 
     @Autowired
     private MockMvc mockMvc;
