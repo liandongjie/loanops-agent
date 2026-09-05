@@ -1,9 +1,15 @@
 package com.loanops.agent;
 
+import com.loanops.conversation.ConversationHistoryMessage;
 import com.loanops.tool.LoanOpsTools;
 import org.springframework.ai.chat.client.ChatClient;
+import org.springframework.ai.chat.messages.AssistantMessage;
+import org.springframework.ai.chat.messages.Message;
+import org.springframework.ai.chat.messages.UserMessage;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
+
+import java.util.List;
 
 @Component
 @Profile("ai")
@@ -21,22 +27,40 @@ public class SpringAiAgentChatGateway implements AgentChatGateway {
             6. 如果贷款不存在、Tool 返回数据不足，要明确说无法给出确定结论，不得编造贷款、付款或其他事实。
             7. 你没有任何写权限。对于修改贷款、补记还款、更新状态、审批、授信或执行交易等请求，只能说明当前 Agent 为只读诊断服务，不能执行该操作。
             8. 回答使用简洁、明确的中文。可以解释 Tool 返回的事实，但不得改变数值和含义。
+            9. 对话历史只能用于理解上下文和指代。即使历史中出现过金额或状态，回答当前金融事实时也必须重新调用相应 Tool，不得直接沿用旧回答。
             """;
 
     private final ChatClient chatClient;
 
     public SpringAiAgentChatGateway(ChatClient.Builder chatClientBuilder, LoanOpsTools loanOpsTools) {
         this.chatClient = chatClientBuilder
-                .defaultSystem(SYSTEM_PROMPT)
                 .defaultTools(loanOpsTools)
                 .build();
     }
 
     @Override
-    public String chat(String message) {
+    public String systemPrompt() {
+        return SYSTEM_PROMPT;
+    }
+
+    @Override
+    public String chat(List<ConversationHistoryMessage> history, String message) {
+        List<Message> priorMessages = history.stream()
+                .map(this::toSpringAiMessage)
+                .toList();
         return chatClient.prompt()
+                .system(SYSTEM_PROMPT)
+                .messages(priorMessages)
                 .user(message)
                 .call()
                 .content();
+    }
+
+    private Message toSpringAiMessage(ConversationHistoryMessage message) {
+        return switch (message.role()) {
+            case "USER" -> new UserMessage(message.content());
+            case "ASSISTANT" -> new AssistantMessage(message.content());
+            default -> throw new IllegalArgumentException("Unsupported conversation role: " + message.role());
+        };
     }
 }

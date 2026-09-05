@@ -20,6 +20,18 @@ public class GlobalExceptionHandler {
                 .body(new ApiError(HttpStatus.NOT_FOUND.value(), "AGENT_AUDIT_NOT_FOUND", exception.getMessage()));
     }
 
+    @ExceptionHandler(ConversationNotFoundException.class)
+    public ResponseEntity<ApiError> handleConversationNotFound(ConversationNotFoundException exception) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(new ApiError(HttpStatus.NOT_FOUND.value(), "CONVERSATION_NOT_FOUND", exception.getMessage()));
+    }
+
+    @ExceptionHandler(ConversationConflictException.class)
+    public ResponseEntity<ApiError> handleConversationConflict(ConversationConflictException exception) {
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(new ApiError(HttpStatus.CONFLICT.value(), "CONVERSATION_CONFLICT", exception.getMessage()));
+    }
+
     @ExceptionHandler(InvalidAgentMessageException.class)
     public ResponseEntity<ApiError> handleInvalidAgentMessage(InvalidAgentMessageException exception) {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)

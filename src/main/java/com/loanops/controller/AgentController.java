@@ -28,8 +28,10 @@ public class AgentController {
     public ResponseEntity<AgentChatResponse> chat(
             @RequestBody(required = false) AgentChatRequest request,
             @RequestAttribute(AgentRequestCorrelationFilter.REQUEST_ATTRIBUTE) String requestId) {
+        String conversationId = request == null ? null : request.conversationId();
         String message = request == null ? null : request.message();
-        AgentChatResult result = agentService.chatWithRequestId(requestId, message);
-        return ResponseEntity.ok(new AgentChatResponse(result.answer()));
+        AgentChatResult result = agentService.chatWithRequestId(requestId, conversationId, message);
+        return ResponseEntity.ok(new AgentChatResponse(
+                result.conversationId(), result.requestId(), result.answer()));
     }
 }

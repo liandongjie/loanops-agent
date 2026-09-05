@@ -20,5 +20,10 @@ public record AgentAuditResponse(
         String messageText,
         String answerText,
         String errorType,
+        String conversationId,
+        Integer historyFromSequence,
+        Integer historyToSequence,
+        String historyHash,
+        String systemPromptHash,
         List<AgentToolAuditResponse> tools) {
 }

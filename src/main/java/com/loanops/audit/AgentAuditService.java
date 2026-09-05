@@ -1,6 +1,8 @@
 package com.loanops.audit;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.loanops.conversation.ConversationHistoryMessage;
+import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.dto.AgentAuditResponse;
 import com.loanops.dto.AgentToolAuditResponse;
 import com.loanops.exception.AgentAuditNotFoundException;
@@ -16,6 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.time.Clock;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Objects;
 
 @Service
 public class AgentAuditService {
@@ -47,25 +50,23 @@ public class AgentAuditService {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public AgentAuditHandle begin(String requestId, String message) {
-        long startedNanos = timeProvider.startNanos();
-        AuditContentSnapshot snapshot = contentPolicy.snapshot(message);
-        AgentAuditLogEntity entity = new AgentAuditLogEntity();
-        entity.setRequestId(requestId);
-        entity.setStartedAt(timeProvider.nowUtc());
-        entity.setStatus("STARTED");
-        entity.setBusinessDate(LocalDate.now(businessClock));
-        entity.setProvider(provider);
-        entity.setModel(model);
-        entity.setMessageLength(snapshot.length());
-        entity.setMessageHash(snapshot.sha256());
-        entity.setMessageText(snapshot.content());
-        if (auditMapper.insert(entity) != 1) {
-            throw new IllegalStateException("agent audit insert affected no rows");
-        }
-        return new AgentAuditHandle(requestId, startedNanos);
+        return insertStarted(requestId, message, null, null);
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public AgentAuditHandle begin(
+            String requestId,
+            String message,
+            ConversationSnapshot conversation,
+            String systemPrompt) {
+        return insertStarted(
+                requestId,
+                message,
+                Objects.requireNonNull(conversation, "conversation"),
+                Objects.requireNonNull(systemPrompt, "systemPrompt"));
+    }
+
+    @Transactional
     public long completeSuccess(AgentAuditHandle handle, String answer) {
         AuditContentSnapshot snapshot = contentPolicy.snapshot(answer);
         long durationMs = timeProvider.elapsedMillis(handle.startedNanos());
@@ -148,6 +149,11 @@ public class AgentAuditService {
                 audit.getMessageText(),
                 audit.getAnswerText(),
                 audit.getErrorType(),
+                audit.getConversationId(),
+                audit.getHistoryFromSequence(),
+                audit.getHistoryToSequence(),
+                audit.getHistoryHash(),
+                audit.getSystemPromptHash(),
                 tools);
     }
 
@@ -157,6 +163,37 @@ public class AgentAuditService {
 
     public long elapsedMillis(ToolAuditHandle handle) {
         return timeProvider.elapsedMillis(handle.startedNanos());
+    }
+
+    private AgentAuditHandle insertStarted(
+            String requestId,
+            String message,
+            ConversationSnapshot conversation,
+            String systemPrompt) {
+        long startedNanos = timeProvider.startNanos();
+        AuditContentSnapshot snapshot = contentPolicy.snapshot(message);
+        AgentAuditLogEntity entity = new AgentAuditLogEntity();
+        entity.setRequestId(requestId);
+        entity.setStartedAt(timeProvider.nowUtc());
+        entity.setStatus("STARTED");
+        entity.setBusinessDate(LocalDate.now(businessClock));
+        entity.setProvider(provider);
+        entity.setModel(model);
+        entity.setMessageLength(snapshot.length());
+        entity.setMessageHash(snapshot.sha256());
+        entity.setMessageText(snapshot.content());
+        if (conversation != null) {
+            List<ConversationHistoryMessage> history = conversation.history();
+            entity.setConversationId(conversation.conversationId());
+            entity.setHistoryFromSequence(history.isEmpty() ? null : history.getFirst().sequenceNo());
+            entity.setHistoryToSequence(history.isEmpty() ? null : history.getLast().sequenceNo());
+            entity.setHistoryHash(conversation.historyHash());
+            entity.setSystemPromptHash(contentPolicy.snapshot(systemPrompt).sha256());
+        }
+        if (auditMapper.insert(entity) != 1) {
+            throw new IllegalStateException("agent audit insert affected no rows");
+        }
+        return new AgentAuditHandle(requestId, startedNanos);
     }
 
     private long completeTool(ToolAuditHandle handle, String status, Throwable failure) {

@@ -3,7 +3,10 @@ package com.loanops.agent;
 import com.loanops.audit.AgentAuditHandle;
 import com.loanops.audit.AgentAuditService;
 import com.loanops.audit.AgentRequestAuditContext;
+import com.loanops.conversation.ConversationSnapshot;
+import com.loanops.conversation.ConversationTurnStore;
 import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.ConversationConflictException;
 import com.loanops.exception.InvalidAgentMessageException;
 import com.loanops.observability.AgentMetrics;
 import org.slf4j.Logger;
@@ -24,6 +27,8 @@ public class LoanOpsAgentService {
 
     private final AgentChatGateway chatGateway;
     private final AgentAuditService auditService;
+    private final AgentTurnCompletionService completionService;
+    private final ConversationTurnStore turnStore;
     private final AgentMetrics metrics;
     private final String provider;
     private final String model;
@@ -31,105 +36,145 @@ public class LoanOpsAgentService {
     public LoanOpsAgentService(
             AgentChatGateway chatGateway,
             AgentAuditService auditService,
+            AgentTurnCompletionService completionService,
+            ConversationTurnStore turnStore,
             AgentMetrics metrics,
             @Value("${loanops.agent.provider:unknown}") String provider,
             @Value("${loanops.agent.model:unknown}") String model) {
         this.chatGateway = chatGateway;
         this.auditService = auditService;
+        this.completionService = completionService;
+        this.turnStore = turnStore;
         this.metrics = metrics;
         this.provider = provider;
         this.model = model;
     }
 
     public AgentChatResult chat(String message) {
-        return chatWithRequestId(UUID.randomUUID().toString(), message);
+        return chatWithRequestId(UUID.randomUUID().toString(), null, message);
     }
 
     public AgentChatResult chatWithRequestId(String requestId, String message) {
+        return chatWithRequestId(requestId, null, message);
+    }
+
+    public AgentChatResult chatWithRequestId(String requestId, String conversationId, String message) {
         long requestStartedNanos = System.nanoTime();
         String auditableMessage = message == null ? "" : message;
         String previousRequestId = MDC.get(REQUEST_ID_MDC_KEY);
         MDC.put(REQUEST_ID_MDC_KEY, requestId);
 
-        AgentAuditHandle auditHandle;
         try {
-            // Fail closed: the remote Agent is never invoked unless STARTED is committed first.
-            auditHandle = auditService.begin(requestId, auditableMessage);
-        } catch (RuntimeException auditFailure) {
-            metrics.recordAuditWriteFailure("agent_begin");
-            metrics.recordRequest("AUDIT_FAILED", elapsedMillis(requestStartedNanos));
-            log.error("Agent audit begin failed requestId={} errorType={}",
-                    requestId, auditFailure.getClass().getSimpleName());
-            restoreRequestId(previousRequestId);
-            throw auditFailure;
-        }
+            if (message == null || message.isBlank()) {
+                AgentAuditHandle auditHandle = beginAudit(
+                        requestId, auditableMessage, null, null, requestStartedNanos);
+                failBeforeModel(auditHandle, new InvalidAgentMessageException());
+            }
 
-        if (message == null || message.isBlank()) {
-            InvalidAgentMessageException validationFailure = new InvalidAgentMessageException();
-            return failBeforeModel(auditHandle, validationFailure, previousRequestId);
-        }
-
-        log.info("Agent request started requestId={} provider={} model={}", requestId, provider, model);
-        try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
-            String answer;
+            ConversationSnapshot snapshot;
             try {
-                answer = chatGateway.chat(message);
-            } catch (RuntimeException | Error modelFailure) {
-                long durationMs = auditService.elapsedMillis(auditHandle);
-                try {
-                    durationMs = auditService.completeFailure(auditHandle, modelFailure);
-                } catch (RuntimeException auditFailure) {
-                    metrics.recordAuditWriteFailure("agent_failure");
-                    modelFailure.addSuppressed(auditFailure);
-                    log.error("Agent failure audit completion failed requestId={} errorType={}",
-                            requestId, auditFailure.getClass().getSimpleName());
-                }
+                snapshot = conversationId == null || conversationId.isBlank()
+                        ? turnStore.create()
+                        : turnStore.resolve(conversationId);
+            } catch (RuntimeException | Error conversationFailure) {
+                long durationMs = elapsedMillis(requestStartedNanos);
                 metrics.recordRequest("FAILED", durationMs);
-                log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                        requestId, provider, model, durationMs, modelFailure.getClass().getSimpleName());
-                throw modelFailure;
+                log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                        requestId, conversationId, provider, model, durationMs,
+                        conversationFailure.getClass().getSimpleName());
+                throw conversationFailure;
             }
 
-            long durationMs;
-            try {
-                durationMs = auditService.completeSuccess(auditHandle, answer);
-            } catch (RuntimeException auditFailure) {
-                metrics.recordAuditWriteFailure("agent_success");
-                metrics.recordRequest("AUDIT_FAILED", auditService.elapsedMillis(auditHandle));
-                log.error("Agent success audit completion failed requestId={} errorType={}",
-                        requestId, auditFailure.getClass().getSimpleName());
-                throw auditFailure;
-            }
+            String systemPrompt = chatGateway.systemPrompt();
+            AgentAuditHandle auditHandle = beginAudit(
+                    requestId, auditableMessage, snapshot, systemPrompt, requestStartedNanos);
 
-            metrics.recordRequest("SUCCESS", durationMs);
-            log.info("Agent request completed requestId={} outcome=SUCCESS provider={} model={} durationMs={}",
-                    requestId, provider, model, durationMs);
-            return new AgentChatResult(requestId, answer);
+            log.info("Agent request started requestId={} conversationId={} provider={} model={}",
+                    requestId, snapshot.conversationId(), provider, model);
+            try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
+                String answer;
+                try {
+                    answer = chatGateway.chat(snapshot.history(), message);
+                } catch (RuntimeException | Error modelFailure) {
+                    long durationMs = completeFailure(auditHandle, modelFailure);
+                    metrics.recordRequest("FAILED", durationMs);
+                    log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                            requestId, snapshot.conversationId(), provider, model, durationMs,
+                            modelFailure.getClass().getSimpleName());
+                    throw modelFailure;
+                }
+
+                long durationMs;
+                try {
+                    durationMs = completionService.complete(auditHandle, snapshot, message, answer);
+                } catch (ConversationConflictException conflict) {
+                    durationMs = completeFailure(auditHandle, conflict);
+                    metrics.recordRequest("FAILED", durationMs);
+                    log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                            requestId, snapshot.conversationId(), provider, model, durationMs,
+                            conflict.getClass().getSimpleName());
+                    throw conflict;
+                } catch (RuntimeException | Error completionFailure) {
+                    metrics.recordAuditWriteFailure("agent_success");
+                    durationMs = completeFailure(auditHandle, completionFailure);
+                    metrics.recordRequest("FAILED", durationMs);
+                    log.error("Agent successful-turn commit failed requestId={} conversationId={} errorType={}",
+                            requestId, snapshot.conversationId(), completionFailure.getClass().getSimpleName());
+                    throw completionFailure;
+                }
+
+                metrics.recordRequest("SUCCESS", durationMs);
+                log.info("Agent request completed requestId={} conversationId={} outcome=SUCCESS provider={} model={} durationMs={}",
+                        requestId, snapshot.conversationId(), provider, model, durationMs);
+                return new AgentChatResult(snapshot.conversationId(), requestId, answer);
+            }
         } finally {
             restoreRequestId(previousRequestId);
         }
     }
 
-    private AgentChatResult failBeforeModel(
+    private AgentAuditHandle beginAudit(
+            String requestId,
+            String message,
+            ConversationSnapshot snapshot,
+            String systemPrompt,
+            long requestStartedNanos) {
+        try {
+            // Fail closed: the remote Agent is never invoked unless STARTED is committed first.
+            return snapshot == null
+                    ? auditService.begin(requestId, message)
+                    : auditService.begin(requestId, message, snapshot, systemPrompt);
+        } catch (RuntimeException auditFailure) {
+            metrics.recordAuditWriteFailure("agent_begin");
+            metrics.recordRequest("AUDIT_FAILED", elapsedMillis(requestStartedNanos));
+            log.error("Agent audit begin failed requestId={} errorType={}",
+                    requestId, auditFailure.getClass().getSimpleName());
+            throw auditFailure;
+        }
+    }
+
+    private void failBeforeModel(
             AgentAuditHandle auditHandle,
-            InvalidAgentMessageException validationFailure,
-            String previousRequestId) {
+            InvalidAgentMessageException validationFailure) {
+        long durationMs = completeFailure(auditHandle, validationFailure);
+        metrics.recordRequest("FAILED", durationMs);
+        log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                auditHandle.requestId(), provider, model, durationMs,
+                validationFailure.getClass().getSimpleName());
+        throw validationFailure;
+    }
+
+    private long completeFailure(AgentAuditHandle auditHandle, Throwable failure) {
         long durationMs = auditService.elapsedMillis(auditHandle);
         try {
-            durationMs = auditService.completeFailure(auditHandle, validationFailure);
-            log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                    auditHandle.requestId(), provider, model, durationMs,
-                    validationFailure.getClass().getSimpleName());
+            return auditService.completeFailure(auditHandle, failure);
         } catch (RuntimeException auditFailure) {
             metrics.recordAuditWriteFailure("agent_failure");
-            validationFailure.addSuppressed(auditFailure);
-            log.error("Agent validation audit completion failed requestId={} errorType={}",
+            failure.addSuppressed(auditFailure);
+            log.error("Agent failure audit completion failed requestId={} errorType={}",
                     auditHandle.requestId(), auditFailure.getClass().getSimpleName());
-        } finally {
-            metrics.recordRequest("FAILED", durationMs);
-            restoreRequestId(previousRequestId);
+            return durationMs;
         }
-        throw validationFailure;
     }
 
     private static long elapsedMillis(long startedNanos) {
