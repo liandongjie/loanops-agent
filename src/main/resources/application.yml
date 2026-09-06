@@ -52,6 +52,13 @@ loanops:
     retrieval-top-k: ${POLICY_RETRIEVAL_TOP_K:5}
     parent-expansion-depth: ${POLICY_PARENT_EXPANSION_DEPTH:1}
     parent-expansion-max-characters: ${POLICY_PARENT_EXPANSION_MAX_CHARACTERS:1600}
+    runtime:
+      enabled: ${POLICY_RETRIEVAL_ENABLED:true}
+      query-prior-user-limit: ${POLICY_QUERY_PRIOR_USER_LIMIT:3}
+      query-max-characters: ${POLICY_QUERY_MAX_CHARACTERS:1200}
+      context-max-evidence: ${POLICY_CONTEXT_MAX_EVIDENCE:5}
+      context-max-characters: ${POLICY_CONTEXT_MAX_CHARACTERS:6000}
+      score-threshold: ${POLICY_SCORE_THRESHOLD:0.0}
 
 logging:
   pattern:
