@@ -160,7 +160,7 @@ class PolicyRagEvaluationIntegrationTest {
         List<String> failed = results.stream().filter(result -> !result.failures().isEmpty()).map(CaseResult::id).toList();
         return new EvalReport(System.getenv().getOrDefault("POLICY_RAG_EVAL_LABEL", "e0").toLowerCase(Locale.ROOT),
                 System.getenv().getOrDefault("POLICY_EVAL_GIT_HEAD", "unknown"), corpus.identifier(),
-                PolicyHashing.sha256(new String(corpusBytes, java.nio.charset.StandardCharsets.UTF_8)),
+                PolicyHashing.sha256(new String(corpusBytes, java.nio.charset.StandardCharsets.UTF_8).replace("\r\n", "\n").replace('\r', '\n')),
                 embeddingModel, dimension, topK, threshold, "deterministic exact + BGE-M3 dense",
                 dataset.cases().size(), chunkCount, metrics, confusion, failed, results);
     }
@@ -345,4 +345,3 @@ class PolicyRagEvaluationIntegrationTest {
                       Map<String, Map<String, Integer>> routerConfusion, List<String> failedCaseIds,
                       List<CaseResult> results) {}
 }
-

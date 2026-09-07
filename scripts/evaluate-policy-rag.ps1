@@ -1,5 +1,5 @@
 param(
-    [ValidateSet("e0", "e1")]
+    [ValidateSet("e0", "e1", "e2")]
     [string]$Label = "e0",
     [double]$Threshold = 0.60,
     [switch]$ManualReview
