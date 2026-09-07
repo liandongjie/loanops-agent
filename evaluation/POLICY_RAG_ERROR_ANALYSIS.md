@@ -51,3 +51,39 @@ human checks. `semantic-002` safely avoided unsupported policy claims but was in
 known Router miss. `mixed-002` cited the correct evidence for all core procedures but added the word
 “质押”, which was not present in the selected evidence; this is one minor GENERATION expansion, not a
 retrieval failure. No citation pointed to the wrong article.
+
+## Phase 7.5 Router Hardening (E2)
+
+The five E1 false negatives (`semantic-001`–`semantic-004`, `temporal-002`) were Router failures,
+not Retriever failures: direct retrieval already returned every Gold reference at rank 1. Phase 7.5
+therefore changed only the deterministic `PolicyRetrievalDecisionEngine` production behavior. The
+small rule now recognizes explicit policy signals, explicit policy references, or a normative modal
+combined with a policy/process action. A current or prior USER loan number upgrades policy intent to
+`SUPPLEMENTAL`; an Assistant-only loan number does not.
+
+The final E2 was executed on clean Router commit
+`a49028db8903b5354abb48b4288b6bab16dcd507` with the same 30 cases, corpus, BGE-M3 embeddings,
+real MySQL/Qdrant, topK 5 and threshold 0.60.
+
+| Metric | E1 | E2 |
+|---|---:|---:|
+| Router Accuracy | 0.8333 | 1.0000 |
+| Policy-required Recall | 0.8077 | 1.0000 |
+| Recall@1 | 1.0000 | 1.0000 |
+| Recall@3 | 1.0000 | 1.0000 |
+| Recall@5 | 1.0000 | 1.0000 |
+| MRR | 1.0000 | 1.0000 |
+| ExactReferenceAccuracy | 1.0000 | 1.0000 |
+| TemporalVersionAccuracy | 1.0000 | 1.0000 |
+| NoMatchAccuracy | 1.0000 | 1.0000 |
+| FalseMatchCount | 0 | 0 |
+
+The report corpus hash is a normalized-content SHA-256: CRLF and CR are converted to LF before
+hashing. It is not a raw-file hash. Retriever code and configuration were not modified, and E1/E2
+retrieval latency variation is not treated as a performance improvement.
+
+Manual reviews are preserved separately as `POLICY_RAG_MANUAL_REVIEW_E1.md` and
+`POLICY_RAG_MANUAL_REVIEW_E2.md`. In E2, `semantic-002` followed
+`REQUIRED → MATCHED → Policy Context → DeepSeek → valid [P1]`. The E2 `mixed-002` answer did not
+reproduce the earlier unsupported “质押” generation expansion. Phase 7.5 did not change generation
+constraints, so the historical generation issue is not considered fixed.

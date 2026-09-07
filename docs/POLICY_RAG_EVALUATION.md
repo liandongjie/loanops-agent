@@ -1,13 +1,19 @@
 # Policy RAG Evaluation
 
 Phase 7.4 uses a fixed, reviewable dataset rather than adding retrieval components by default.
+Phase 7.5 reuses those frozen retrieval inputs and adds only a focused Router regression set.
 
 ## Inputs
 
 - `evaluation/policy-rag-cases.json`: 30 hand-authored Gold cases.
 - `evaluation/policy-rag-corpus.json`: versioned `EVALUATION_SYNTHETIC` corpus.
+- `evaluation/policy-router-hardening-cases.json`: 22 Router-only regression cases; it is not used to
+  calculate retrieval metrics.
 - The runner creates `loanops_policy_rag_eval` as an isolated MySQL schema and Qdrant collection,
   then removes both after the run. It never downloads policy text at test time.
+
+The reported corpus SHA-256 is calculated after normalizing CRLF and CR line endings to LF. It is a
+normalized-content hash, not a raw-file hash.
 
 Gold is expressed with stable business metadata such as decision, retrieval status, document number,
 article number, version applicability and expected Tool names. Database UUIDs are not Gold labels.
@@ -40,16 +46,25 @@ $env:Path = "$env:JAVA_HOME\bin;$env:Path"
 
 # Accepted targeted change
 .\scripts\evaluate-policy-rag.ps1 -Label e1 -Threshold 0.60
+
+# Router hardening on the same dataset and corpus
+.\scripts\evaluate-policy-rag.ps1 -Label e2 -Threshold 0.60
 ```
 
 For the representative real DeepSeek review:
 
 ```powershell
-.\scripts\evaluate-policy-rag.ps1 -Label e1 -Threshold 0.60 -ManualReview
+.\scripts\evaluate-policy-rag.ps1 -Label e2 -Threshold 0.60 -ManualReview
 ```
 
 The API key remains an environment variable. Reports are written to `evaluation/results/`, while the
-human evidence review is `evaluation/POLICY_RAG_MANUAL_REVIEW.md`.
+historical E1 and clean-commit E2 human reviews are preserved separately as
+`evaluation/POLICY_RAG_MANUAL_REVIEW_E1.md` and `evaluation/POLICY_RAG_MANUAL_REVIEW_E2.md`.
+
+Phase 7.5 changes Router behavior only; Retriever code, topK, threshold, embedding model and Qdrant
+configuration remain unchanged. Retrieval latency varies between runs and is not a Phase 7.5
+optimization claim. The E2 `mixed-002` run did not reproduce the E1 unsupported “质押” expansion,
+but generation constraints were not changed and that historical finding is not considered fixed.
 
 ## Hard gates
 

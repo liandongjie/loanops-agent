@@ -1,0 +1,1442 @@
+{
+  "label" : "e2",
+  "gitHead" : "a49028db8903b5354abb48b4288b6bab16dcd507",
+  "corpusIdentifier" : "policy-rag-eval-corpus-v1",
+  "corpusHash" : "4c33abd1a2674d0afcf0df474d5b948869bdb6fae0748f5fc845ad044b22097f",
+  "embeddingModel" : "bge-m3",
+  "embeddingDimension" : 1024,
+  "topK" : 5,
+  "threshold" : 0.6,
+  "strategy" : "deterministic exact + BGE-M3 dense",
+  "caseCount" : 30,
+  "corpusChunkCount" : 41,
+  "metrics" : {
+    "routerAccuracy" : 1.0,
+    "policyRequiredRecall" : 1.0,
+    "recallAt1" : 1.0,
+    "recallAt3" : 1.0,
+    "recallAt5" : 1.0,
+    "mrr" : 1.0,
+    "exactReferenceAccuracy" : 1.0,
+    "temporalVersionAccuracy" : 1.0,
+    "noMatchAccuracy" : 1.0,
+    "falseMatchCount" : 0,
+    "retrievalLatencyP50Ms" : 101,
+    "retrievalLatencyP95Ms" : 146
+  },
+  "routerConfusion" : {
+    "NOT_REQUIRED" : {
+      "NOT_REQUIRED" : 4,
+      "SUPPLEMENTAL" : 0,
+      "REQUIRED" : 0
+    },
+    "SUPPLEMENTAL" : {
+      "NOT_REQUIRED" : 0,
+      "SUPPLEMENTAL" : 7,
+      "REQUIRED" : 0
+    },
+    "REQUIRED" : {
+      "NOT_REQUIRED" : 0,
+      "SUPPLEMENTAL" : 0,
+      "REQUIRED" : 19
+    }
+  },
+  "failedCaseIds" : [ ],
+  "results" : [ {
+    "id" : "fin-001",
+    "category" : "PURE_FINANCIAL",
+    "expectedDecision" : "NOT_REQUIRED",
+    "actualDecision" : "NOT_REQUIRED",
+    "actualRetrievalStatus" : "NOT_RUN",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 0,
+    "failures" : [ ],
+    "hits" : [ ]
+  }, {
+    "id" : "fin-002",
+    "category" : "PURE_FINANCIAL",
+    "expectedDecision" : "NOT_REQUIRED",
+    "actualDecision" : "NOT_REQUIRED",
+    "actualRetrievalStatus" : "NOT_RUN",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 0,
+    "failures" : [ ],
+    "hits" : [ ]
+  }, {
+    "id" : "fin-003",
+    "category" : "PURE_FINANCIAL",
+    "expectedDecision" : "NOT_REQUIRED",
+    "actualDecision" : "NOT_REQUIRED",
+    "actualRetrievalStatus" : "NOT_RUN",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 0,
+    "failures" : [ ],
+    "hits" : [ ]
+  }, {
+    "id" : "fin-004",
+    "category" : "PURE_FINANCIAL",
+    "expectedDecision" : "NOT_REQUIRED",
+    "actualDecision" : "NOT_REQUIRED",
+    "actualRetrievalStatus" : "NOT_RUN",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 0,
+    "failures" : [ ],
+    "hits" : [ ]
+  }, {
+    "id" : "policy-001",
+    "category" : "PURE_POLICY",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 198,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.82558805,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6668479,
+      "content" : "第四十八条\n对借款人提出的贷后服务投诉，贷款人应及时登记、调查并反馈处理结果。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6624954,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.65380573,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.64837235,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    } ]
+  }, {
+    "id" : "policy-002",
+    "category" : "PURE_POLICY",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 101,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.7962576,
+      "content" : "第四十五条\n贷款全部清偿后，贷款人应当及时出具结清证明，办理相关解押手续，并妥善保存还款凭证。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6905848,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6786735,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.67323947,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6583159,
+      "content" : "第四十八条\n对借款人提出的贷后服务投诉，贷款人应及时登记、调查并反馈处理结果。"
+    } ]
+  }, {
+    "id" : "policy-003",
+    "category" : "PURE_POLICY",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 109,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.8173628,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.68284917,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.65377104,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.64096564,
+      "content" : "第二十条\n贷款人提供产品信息时，应清晰说明贷款期限、利率、费用和主要风险。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.639879,
+      "content" : "第二十一条\n贷款合同签订前，应给予借款人合理阅读时间并对重要条款进行提示。"
+    } ]
+  }, {
+    "id" : "policy-004",
+    "category" : "PURE_POLICY",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 117,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.75090194,
+      "content" : "第十三条\n重组资产应结合债务人财务困难、合同调整和重组后履约情况进行持续评估。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.56545514,
+      "content" : "第十五条\n债务人履约能力出现不利变化但尚未发生明显损失时，应重点关注风险。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十七条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.56489074,
+      "content" : "第十七条\n采取所有可能措施后仍只能收回极少部分资产时，应识别损失程度。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5621228,
+      "content" : "第十一条\n贷款人应收集财务、经营和履约信息，完成风险分类的初分与复核。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5521058,
+      "content" : "第十八条\n风险分类发生调整时，应保存判断依据、审批记录和调整日期。"
+    } ]
+  }, {
+    "id" : "policy-005",
+    "category" : "PURE_POLICY",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 101,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.74099517,
+      "content" : "第二十六条\n收到客户投诉后，应登记受理、调查事实，并在承诺期限内反馈处理结果。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.67958945,
+      "content" : "第四十八条\n对借款人提出的贷后服务投诉，贷款人应及时登记、调查并反馈处理结果。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5834737,
+      "content" : "第四十六条\n催收记录应当载明联系时间、沟通对象、沟通内容和后续安排，并按照档案要求保存。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5770482,
+      "content" : "第三十八条\n发生信息系统事件时，应及时报告、隔离影响、恢复服务并保留处置记录。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5694402,
+      "content" : "第三十四条\n贷后岗位人员应接受制度、数据安全和客户权益保护培训。"
+    } ]
+  }, {
+    "id" : "mixed-001",
+    "category" : "MIXED",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 115,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.7026659,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6278777,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6027079,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5985224,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.58951116,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    } ]
+  }, {
+    "id" : "mixed-002",
+    "category" : "MIXED",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 110,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.65088737,
+      "content" : "第四十五条\n贷款全部清偿后，贷款人应当及时出具结清证明，办理相关解押手续，并妥善保存还款凭证。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6117136,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.60336804,
+      "content" : "第三十条\n贷款发放前应核对合同生效条件、放款指令和收款账户信息。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6024509,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5798185,
+      "content" : "第二十四条\n收到借款人还款后，贷款人应提供可核验的收款记录或者还款凭证。"
+    } ]
+  }, {
+    "id" : "mixed-003",
+    "category" : "MIXED",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 86,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.62443364,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5344347,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.50939727,
+      "content" : "第三十条\n贷款发放前应核对合同生效条件、放款指令和收款账户信息。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5020508,
+      "content" : "第二十条\n贷款人提供产品信息时，应清晰说明贷款期限、利率、费用和主要风险。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.4898935,
+      "content" : "第二十四条\n收到借款人还款后，贷款人应提供可核验的收款记录或者还款凭证。"
+    } ]
+  }, {
+    "id" : "mixed-004",
+    "category" : "MIXED",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 107,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.8073276,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.58941495,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5889567,
+      "content" : "第十条\n金融资产风险分类应以债务人的履约能力和金融资产风险程度为基础。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5832181,
+      "content" : "第十六条\n债务人的偿还能力明显不足、依靠正常经营收入无法足额偿还时，应识别为较高风险。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5831598,
+      "content" : "第十八条\n风险分类发生调整时，应保存判断依据、审批记录和调整日期。"
+    } ]
+  }, {
+    "id" : "mixed-005",
+    "category" : "MIXED",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 94,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.72033167,
+      "content" : "第二十二条\n还款日前，贷款人可以通过约定渠道向借款人发送还款日期和应还金额提示。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6748139,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6393846,
+      "content" : "第三十条\n贷款发放前应核对合同生效条件、放款指令和收款账户信息。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6106254,
+      "content" : "第二十四条\n收到借款人还款后，贷款人应提供可核验的收款记录或者还款凭证。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5940969,
+      "content" : "第二十一条\n贷款合同签订前，应给予借款人合理阅读时间并对重要条款进行提示。"
+    } ]
+  }, {
+    "id" : "exact-001",
+    "category" : "EXACT_REFERENCE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 100,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "EXACT",
+      "score" : 1.0,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.51334524,
+      "content" : "第三十四条\n贷后岗位人员应接受制度、数据安全和客户权益保护培训。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5082717,
+      "content" : "第三十六条\n生产系统重要变更应经过测试、审批并制定回退方案。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.49268383,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.4856813,
+      "content" : "第四十三条\n对出现风险预警信号的贷款，贷款人应及时核实原因、评估影响并制定跟踪措施。"
+    } ]
+  }, {
+    "id" : "exact-002",
+    "category" : "EXACT_REFERENCE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 99,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十三条",
+      "matchType" : "EXACT_AND_SEMANTIC",
+      "score" : 1.0,
+      "content" : "第十三条\n重组资产应结合债务人财务困难、合同调整和重组后履约情况进行持续评估。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.55088246,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.54488206,
+      "content" : "第十六条\n债务人的偿还能力明显不足、依靠正常经营收入无法足额偿还时，应识别为较高风险。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5344743,
+      "content" : "第十八条\n风险分类发生调整时，应保存判断依据、审批记录和调整日期。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.50565124,
+      "content" : "第四十三条\n对出现风险预警信号的贷款，贷款人应及时核实原因、评估影响并制定跟踪措施。"
+    } ]
+  }, {
+    "id" : "exact-003",
+    "category" : "EXACT_REFERENCE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 123,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十四条",
+      "matchType" : "EXACT",
+      "score" : 1.0,
+      "content" : "第二十四条\n收到借款人还款后，贷款人应提供可核验的收款记录或者还款凭证。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.60633606,
+      "content" : "第三十四条\n贷后岗位人员应接受制度、数据安全和客户权益保护培训。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.60055363,
+      "content" : "第二十六条\n收到客户投诉后，应登记受理、调查事实，并在承诺期限内反馈处理结果。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.561283,
+      "content" : "第二十五条\n处理借款人个人信息应遵循合法、正当、必要原则，并采取安全保护措施。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5485426,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    } ]
+  }, {
+    "id" : "exact-004",
+    "category" : "EXACT_REFERENCE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 146,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十二条",
+      "matchType" : "EXACT",
+      "score" : 1.0,
+      "content" : "第三十二条\n贷款档案应按照统一目录归档，确保合同、凭证和审批材料能够检索。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5588207,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5476774,
+      "content" : "第三十六条\n生产系统重要变更应经过测试、审批并制定回退方案。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十九条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5323892,
+      "content" : "第三十九条\n分支机构应按期报送贷后运营数据，并对数据准确性负责。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十七条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.52675086,
+      "content" : "第三十七条\n外部服务供应商应经过准入评估，并持续监测其服务质量和安全风险。"
+    } ]
+  }, {
+    "id" : "semantic-001",
+    "category" : "SEMANTIC_PARAPHRASE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 101,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.7189141,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6620163,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6445956,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6350394,
+      "content" : "第二十一条\n贷款合同签订前，应给予借款人合理阅读时间并对重要条款进行提示。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6148026,
+      "content" : "第四十一条\n贷款人应持续监测借款人的还款能力、资金用途和风险变化，并形成贷后检查记录。"
+    } ]
+  }, {
+    "id" : "semantic-002",
+    "category" : "SEMANTIC_PARAPHRASE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 106,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6440425,
+      "content" : "第四十五条\n贷款全部清偿后，贷款人应当及时出具结清证明，办理相关解押手续，并妥善保存还款凭证。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.63795877,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6269136,
+      "content" : "第四十三条\n对出现风险预警信号的贷款，贷款人应及时核实原因、评估影响并制定跟踪措施。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.61688143,
+      "content" : "第四十八条\n对借款人提出的贷后服务投诉，贷款人应及时登记、调查并反馈处理结果。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.61666566,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    } ]
+  }, {
+    "id" : "semantic-003",
+    "category" : "SEMANTIC_PARAPHRASE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 100,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.7053215,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.64414644,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.62864053,
+      "content" : "第十四条\n债务人能够正常履约且不存在足以影响偿还的不利因素时，可以分类为正常。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.61426926,
+      "content" : "第二十二条\n还款日前，贷款人可以通过约定渠道向借款人发送还款日期和应还金额提示。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.61108935,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    } ]
+  }, {
+    "id" : "semantic-004",
+    "category" : "SEMANTIC_PARAPHRASE",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 102,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十七条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.7237541,
+      "content" : "第四十七条\n委托外部机构开展催收的，贷款人应当审查受托机构、约定行为边界并持续监督。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.635008,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.62079835,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十九条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5954875,
+      "content" : "第三十九条\n分支机构应按期报送贷后运营数据，并对数据准确性负责。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5928312,
+      "content" : "第四十一条\n贷款人应持续监测借款人的还款能力、资金用途和风险变化，并形成贷后检查记录。"
+    } ]
+  }, {
+    "id" : "temporal-001",
+    "category" : "TEMPORAL_VERSION",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 115,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.74248993,
+      "content" : "第四十四条\n贷款未按照合同约定偿还的，贷款人应当采取清收、协商重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.65119326,
+      "content" : "第四十五条\n贷款全部还清后，贷款人应当出具结清确认，并及时办理相关解押手续。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.63873756,
+      "content" : "第四十二条\n借款人申请展期的，应当在贷款到期前提交书面申请，贷款人完成审查后决定是否同意。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.61615604,
+      "content" : "第四十三条\n对暂时出现流动性困难但仍有还款意愿的借款人，可以根据风险情况协商调整还款安排。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.58767325,
+      "content" : "第四十一条\n贷款人应当定期检查借款人经营情况、还款能力和贷款资金使用情况。"
+    } ]
+  }, {
+    "id" : "temporal-002",
+    "category" : "TEMPORAL_VERSION",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 99,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.8152087,
+      "content" : "第四十五条\n贷款全部还清后，贷款人应当出具结清确认，并及时办理相关解押手续。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6671541,
+      "content" : "第四十四条\n贷款未按照合同约定偿还的，贷款人应当采取清收、协商重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.64619195,
+      "content" : "第四十六条\n清收过程应记录联系时间、沟通内容和后续安排，并妥善保存相关材料。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6407814,
+      "content" : "第四十二条\n借款人申请展期的，应当在贷款到期前提交书面申请，贷款人完成审查后决定是否同意。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2025",
+      "versionLabel" : "2025版",
+      "articleNo" : "第四十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6222116,
+      "content" : "第四十一条\n贷款人应当定期检查借款人经营情况、还款能力和贷款资金使用情况。"
+    } ]
+  }, {
+    "id" : "temporal-003",
+    "category" : "TEMPORAL_VERSION",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 83,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.8301727,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.66103363,
+      "content" : "第四十八条\n对借款人提出的贷后服务投诉，贷款人应及时登记、调查并反馈处理结果。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.65866554,
+      "content" : "第四十三条\n对出现风险预警信号的贷款，贷款人应及时核实原因、评估影响并制定跟踪措施。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6552741,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6551035,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    } ]
+  }, {
+    "id" : "nomatch-001",
+    "category" : "NO_MATCH",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "NO_MATCH",
+    "actualRetrievalStatus" : "NO_MATCH",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 83,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5614126,
+      "content" : "第三十六条\n生产系统重要变更应经过测试、审批并制定回退方案。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5304861,
+      "content" : "第三十四条\n贷后岗位人员应接受制度、数据安全和客户权益保护培训。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.51191443,
+      "content" : "第二十六条\n收到客户投诉后，应登记受理、调查事实，并在承诺期限内反馈处理结果。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5069779,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.49797565,
+      "content" : "第十八条\n风险分类发生调整时，应保存判断依据、审批记录和调整日期。"
+    } ]
+  }, {
+    "id" : "nomatch-002",
+    "category" : "NO_MATCH",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "NO_MATCH",
+    "actualRetrievalStatus" : "NO_MATCH",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 102,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5170749,
+      "content" : "第三十六条\n生产系统重要变更应经过测试、审批并制定回退方案。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.502567,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.4994468,
+      "content" : "第三十五条\n印章和重要凭证应实行登记、保管和使用复核。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.49788523,
+      "content" : "第四十六条\n催收记录应当载明联系时间、沟通对象、沟通内容和后续安排，并按照档案要求保存。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十六条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.49547264,
+      "content" : "第二十六条\n收到客户投诉后，应登记受理、调查事实，并在承诺期限内反馈处理结果。"
+    } ]
+  }, {
+    "id" : "nomatch-003",
+    "category" : "NO_MATCH",
+    "expectedDecision" : "REQUIRED",
+    "actualDecision" : "REQUIRED",
+    "expectedRetrievalStatus" : "NO_MATCH",
+    "actualRetrievalStatus" : "NO_MATCH",
+    "goldRank" : 0,
+    "temporalCorrect" : true,
+    "durationMs" : 83,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.4594649,
+      "content" : "第三十三条\n关键业务数据应定期备份，并验证备份数据能够恢复。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.44694844,
+      "content" : "第三十四条\n贷后岗位人员应接受制度、数据安全和客户权益保护培训。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.42643458,
+      "content" : "第三十八条\n发生信息系统事件时，应及时报告、隔离影响、恢复服务并保留处置记录。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十八条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.40932053,
+      "content" : "第十八条\n风险分类发生调整时，应保存判断依据、审批记录和调整日期。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十七条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.39873737,
+      "content" : "第三十七条\n外部服务供应商应经过准入评估，并持续监测其服务质量和安全风险。"
+    } ]
+  }, {
+    "id" : "multi-001",
+    "category" : "MULTI_TURN",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 97,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.63422763,
+      "content" : "第四十四条\n贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-RISK-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.62743616,
+      "content" : "第十二条\n逾期天数是风险分类的重要参考，但不得仅以逾期天数替代对偿债能力的综合判断。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十二条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.55423766,
+      "content" : "第四十二条\n借款人申请展期的，应当在到期前提交申请和偿债计划，贷款人完成风险审查后作出决定。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5431012,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5351256,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    } ]
+  }, {
+    "id" : "multi-002",
+    "category" : "MULTI_TURN",
+    "expectedDecision" : "SUPPLEMENTAL",
+    "actualDecision" : "SUPPLEMENTAL",
+    "expectedRetrievalStatus" : "MATCHED",
+    "actualRetrievalStatus" : "MATCHED",
+    "goldRank" : 1,
+    "temporalCorrect" : true,
+    "durationMs" : 101,
+    "failures" : [ ],
+    "hits" : [ {
+      "rank" : 1,
+      "documentNumber" : "EVAL-POST-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第四十五条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.6253323,
+      "content" : "第四十五条\n贷款全部清偿后，贷款人应当及时出具结清证明，办理相关解押手续，并妥善保存还款凭证。"
+    }, {
+      "rank" : 2,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十一条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.60034126,
+      "content" : "第三十一条\n贷款资金支付后，应按照约定方式核验资金流向并记录异常情况。"
+    }, {
+      "rank" : 3,
+      "documentNumber" : "EVAL-OPS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第三十条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.57615256,
+      "content" : "第三十条\n贷款发放前应核对合同生效条件、放款指令和收款账户信息。"
+    }, {
+      "rank" : 4,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十三条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.5624949,
+      "content" : "第二十三条\n借款人提交提前还款申请的，贷款人应按照合同约定告知办理条件和所需材料。"
+    }, {
+      "rank" : 5,
+      "documentNumber" : "EVAL-RIGHTS-2026",
+      "versionLabel" : "2026版",
+      "articleNo" : "第二十四条",
+      "matchType" : "SEMANTIC",
+      "score" : 0.55525166,
+      "content" : "第二十四条\n收到借款人还款后，贷款人应提供可核验的收款记录或者还款凭证。"
+    } ]
+  } ]
+}
