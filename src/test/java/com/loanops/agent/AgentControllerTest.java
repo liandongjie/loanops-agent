@@ -2,13 +2,16 @@ package com.loanops.agent;
 
 import com.loanops.controller.AgentController;
 import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.AgentProviderUnavailableException;
 import com.loanops.exception.ConversationConflictException;
 import com.loanops.exception.ConversationNotFoundException;
 import com.loanops.exception.GlobalExceptionHandler;
 import com.loanops.exception.InvalidAgentMessageException;
+import com.loanops.exception.PolicyRetrievalException;
 import com.loanops.observability.AgentRequestCorrelationFilter;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.MediaType;
+import org.springframework.web.client.ResourceAccessException;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
@@ -116,6 +119,39 @@ class AgentControllerTest {
                 .andExpect(jsonPath("$.code").value("CONVERSATION_CONFLICT"));
     }
 
+    @Test
+    void providerFailureReturnsStable503WithoutLeakingCause() throws Exception {
+        doThrow(new AgentProviderUnavailableException(
+                new ResourceAccessException("https://provider.example?api_key=secret timed out")))
+                .when(agentService).chatWithRequestId(anyString(), isNull(), eq(MESSAGE));
+
+        MvcResult result = mockMvc.perform(post("/api/agent/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + MESSAGE + "\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("AGENT_PROVIDER_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").value("Agent provider is temporarily unavailable"))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("secret", "provider.example");
+    }
+
+    @Test
+    void requiredPolicyFailureReturnsStable503WithoutLeakingCause() throws Exception {
+        doThrow(new PolicyRetrievalException(new RuntimeException("http://qdrant.internal failed")))
+                .when(agentService).chatWithRequestId(anyString(), isNull(), eq(MESSAGE));
+
+        MvcResult result = mockMvc.perform(post("/api/agent/chat")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + MESSAGE + "\"}"))
+                .andExpect(status().isServiceUnavailable())
+                .andExpect(jsonPath("$.code").value("POLICY_RETRIEVAL_UNAVAILABLE"))
+                .andExpect(jsonPath("$.message").value(
+                        "Required policy retrieval is temporarily unavailable"))
+                .andReturn();
+
+        assertThat(result.getResponse().getContentAsString()).doesNotContain("qdrant.internal");
+    }
     @Test
     void clientSuppliedRequestIdIsStillReplacedByServerGeneratedId() throws Exception {
         when(agentService.chatWithRequestId(anyString(), isNull(), eq(MESSAGE)))

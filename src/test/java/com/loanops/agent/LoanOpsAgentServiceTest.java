@@ -57,7 +57,7 @@ class LoanOpsAgentServiceTest {
     private final PolicyRuntimeService policyRuntimeService = mock(PolicyRuntimeService.class);
     private final LoanOpsAgentService service = new LoanOpsAgentService(
             gateway, auditService, completionService, turnStore, metrics, policyRuntimeService,
-            "deepseek", "deepseek-chat");
+            "deepseek", "deepseek-chat", 4000);
 
     @BeforeEach
     void defaults() {
@@ -116,6 +116,25 @@ class LoanOpsAgentServiceTest {
         verify(metrics).recordRequest("FAILED", 4L);
     }
 
+    @Test
+    void oversizedMessageIsAuditedBeforeConversationPolicyOrProvider() {
+        String requestId = "22222222-2222-2222-2222-222222222222";
+        String message = "x".repeat(4001);
+        AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
+        when(auditService.begin(requestId, message)).thenReturn(handle);
+        when(auditService.completeFailure(any(), any(InvalidAgentMessageException.class))).thenReturn(5L);
+
+        assertThatThrownBy(() -> service.chatWithRequestId(requestId, null, message))
+                .isInstanceOf(InvalidAgentMessageException.class)
+                .hasMessage("message must not exceed 4000 characters");
+
+        verify(turnStore, never()).create();
+        verify(turnStore, never()).resolve(anyString());
+        verify(policyRuntimeService, never()).prepare(anyString(), any(), anyString());
+        verify(gateway, never()).chat(any());
+        verify(completionService, never()).complete(any(), any(), anyString(), anyString());
+        verify(metrics).recordRequest("FAILED", 5L);
+    }
     @Test
     void unknownConversationFailsBeforeAuditPolicyOrProvider() {
         when(turnStore.resolve(CONVERSATION_ID)).thenThrow(new ConversationNotFoundException(CONVERSATION_ID));

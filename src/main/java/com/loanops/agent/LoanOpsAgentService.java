@@ -38,6 +38,7 @@ public class LoanOpsAgentService {
     private final PolicyRuntimeService policyRuntimeService;
     private final String provider;
     private final String model;
+    private final int maxMessageCharacters;
 
     public LoanOpsAgentService(
             AgentChatGateway chatGateway,
@@ -47,7 +48,11 @@ public class LoanOpsAgentService {
             AgentMetrics metrics,
             PolicyRuntimeService policyRuntimeService,
             @Value("${loanops.agent.provider:unknown}") String provider,
-            @Value("${loanops.agent.model:unknown}") String model) {
+            @Value("${loanops.agent.model:unknown}") String model,
+            @Value("${loanops.agent.max-message-characters:4000}") int maxMessageCharacters) {
+        if (maxMessageCharacters < 1) {
+            throw new IllegalArgumentException("Agent message character limit must be positive");
+        }
         this.chatGateway = chatGateway;
         this.auditService = auditService;
         this.completionService = completionService;
@@ -56,6 +61,7 @@ public class LoanOpsAgentService {
         this.policyRuntimeService = policyRuntimeService;
         this.provider = provider;
         this.model = model;
+        this.maxMessageCharacters = maxMessageCharacters;
     }
 
     public AgentChatResult chat(String message) {
@@ -77,6 +83,12 @@ public class LoanOpsAgentService {
                 AgentAuditHandle auditHandle = beginAudit(
                         requestId, auditableMessage, null, null, requestStartedNanos);
                 failBeforeModel(auditHandle, new InvalidAgentMessageException());
+            }
+            if (message.length() > maxMessageCharacters) {
+                AgentAuditHandle auditHandle = beginAudit(
+                        requestId, auditableMessage, null, null, requestStartedNanos);
+                failBeforeModel(auditHandle, new InvalidAgentMessageException(
+                        "message must not exceed " + maxMessageCharacters + " characters"));
             }
 
             ConversationSnapshot snapshot;

@@ -37,4 +37,18 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(new ApiError(HttpStatus.BAD_REQUEST.value(), "INVALID_AGENT_MESSAGE", exception.getMessage()));
     }
+
+    @ExceptionHandler(AgentProviderUnavailableException.class)
+    public ResponseEntity<ApiError> handleAgentProviderUnavailable(AgentProviderUnavailableException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiError(HttpStatus.SERVICE_UNAVAILABLE.value(), "AGENT_PROVIDER_UNAVAILABLE",
+                        exception.getMessage()));
+    }
+
+    @ExceptionHandler(PolicyRetrievalException.class)
+    public ResponseEntity<ApiError> handlePolicyRetrieval(PolicyRetrievalException exception) {
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(new ApiError(HttpStatus.SERVICE_UNAVAILABLE.value(), "POLICY_RETRIEVAL_UNAVAILABLE",
+                        "Required policy retrieval is temporarily unavailable"));
+    }
 }

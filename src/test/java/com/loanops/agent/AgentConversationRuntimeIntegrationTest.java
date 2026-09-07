@@ -10,6 +10,7 @@ import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.conversation.ConversationTurnStore;
 import com.loanops.dto.AgentAuditResponse;
 import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.AgentProviderUnavailableException;
 import com.loanops.exception.ConversationConflictException;
 import com.loanops.exception.ConversationNotFoundException;
 import com.loanops.exception.LoanNotFoundException;
@@ -171,7 +172,8 @@ class AgentConversationRuntimeIntegrationTest {
     @Test
     void providerFailureLeavesFailedAuditAndNoConversationMessages() {
         String requestId = UUID.randomUUID().toString();
-        RuntimeException providerFailure = new RuntimeException("provider unavailable");
+        AgentProviderUnavailableException providerFailure =
+                new AgentProviderUnavailableException(new RuntimeException("provider unavailable"));
         org.mockito.Mockito.reset(gateway);
         when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
         when(gateway.chat(any())).thenThrow(providerFailure);
@@ -181,7 +183,7 @@ class AgentConversationRuntimeIntegrationTest {
 
         AgentAuditResponse audit = auditService.get(requestId);
         assertThat(audit.status()).isEqualTo("FAILED");
-        assertThat(audit.errorType()).isEqualTo("RuntimeException");
+        assertThat(audit.errorType()).isEqualTo("AgentProviderUnavailableException");
         assertThat(messages(audit.conversationId())).isEmpty();
     }
 
