@@ -24,7 +24,7 @@ public class PolicyGroundingContextFactory {
     public PolicyGroundingContextFactory(
             @Value("${loanops.policy.runtime.context-max-evidence:5}") int maxEvidence,
             @Value("${loanops.policy.runtime.context-max-characters:6000}") int maxCharacters,
-            @Value("${loanops.policy.runtime.score-threshold:0.0}") double threshold) {
+            @Value("${loanops.policy.runtime.score-threshold:0.60}") double threshold) {
         if (maxEvidence < 1 || maxCharacters < 1 || threshold < 0 || threshold > 1) {
             throw new IllegalArgumentException("Invalid policy context limits");
         }

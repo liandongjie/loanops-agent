@@ -58,7 +58,7 @@ loanops:
       query-max-characters: ${POLICY_QUERY_MAX_CHARACTERS:1200}
       context-max-evidence: ${POLICY_CONTEXT_MAX_EVIDENCE:5}
       context-max-characters: ${POLICY_CONTEXT_MAX_CHARACTERS:6000}
-      score-threshold: ${POLICY_SCORE_THRESHOLD:0.0}
+      score-threshold: ${POLICY_SCORE_THRESHOLD:0.60}
 
 logging:
   pattern:

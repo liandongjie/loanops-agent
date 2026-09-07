@@ -24,6 +24,7 @@ public class PolicyRetriever {
     private static final Pattern ARTICLE = Pattern.compile("第[一二三四五六七八九十百千0-9]+条");
     private static final Pattern CHAPTER = Pattern.compile("第[一二三四五六七八九十百千0-9]+章");
     private static final Pattern DOCUMENT_NUMBER = Pattern.compile("\\d{4}年第\\d+号(?:令)?");
+    private static final Pattern QUOTED_TITLE = Pattern.compile("《([^》]+)》");
 
     private final PolicyRepository repository;
     private final PolicyEmbeddingProvider embeddingProvider;
@@ -102,16 +103,25 @@ public class PolicyRetriever {
         String article = find(ARTICLE, query);
         String chapter = find(CHAPTER, query);
         String documentNumber = find(DOCUMENT_NUMBER, query);
-        return (article != null && article.equals(stored.chunk().articleNo()))
-                || (chapter != null && chapter.equals(stored.chunk().chapterNo()))
-                || (documentNumber != null && stored.version().documentNumber() != null
-                && stored.version().documentNumber().contains(documentNumber))
-                || query.contains(stored.document().title());
+        String quotedTitle = findGroup(QUOTED_TITLE, query, 1);
+        if (article != null || chapter != null || documentNumber != null || quotedTitle != null) {
+            return (article == null || article.equals(stored.chunk().articleNo()))
+                    && (chapter == null || chapter.equals(stored.chunk().chapterNo()))
+                    && (documentNumber == null || stored.version().documentNumber() != null
+                    && stored.version().documentNumber().contains(documentNumber))
+                    && (quotedTitle == null || quotedTitle.equals(stored.document().title()));
+        }
+        return query.contains(stored.document().title());
     }
 
     private static String find(Pattern pattern, String query) {
         Matcher matcher = pattern.matcher(query);
         return matcher.find() ? matcher.group() : null;
+    }
+
+    private static String findGroup(Pattern pattern, String query, int group) {
+        Matcher matcher = pattern.matcher(query);
+        return matcher.find() ? matcher.group(group) : null;
     }
 
     private static int rank(MatchType type) {

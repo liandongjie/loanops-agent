@@ -27,8 +27,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 @EnabledIfEnvironmentVariable(named = "POLICY_AGENT_REAL_E2E_TEST", matches = "true")
 @SpringBootTest(properties = {
         "loanops.business-date=2026-08-23",
-        "loanops.policy.qdrant.collection=loanops_policy_agent_real_e2e",
-        "loanops.policy.runtime.score-threshold=0.0"
+        "loanops.policy.qdrant.collection=loanops_policy_agent_real_e2e"
 })
 @ActiveProfiles({"mysql", "policy", "ai"})
 class PolicyAgentRealE2EIntegrationTest {

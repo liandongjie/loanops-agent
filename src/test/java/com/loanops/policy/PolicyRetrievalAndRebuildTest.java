@@ -45,6 +45,25 @@ class PolicyRetrievalAndRebuildTest {
     }
 
     @Test
+    void exactReferenceCombinesQuotedDocumentTitleAndArticle() {
+        StoredChunk wrongArticle = stored("wrong", null, ChunkType.ARTICLE, true,
+                "第二十五条", "个人信息规则");
+        StoredChunk rightArticle = stored("right", null, ChunkType.ARTICLE, true,
+                "第二十四条", "还款凭证规则");
+        FakeRepository repository = new FakeRepository(
+                List.of(wrongArticle, rightArticle), List.of(wrongArticle, rightArticle));
+        PolicyRetriever retriever = new PolicyRetriever(repository,
+                texts -> List.of(new float[]{0.1f}),
+                (embedding, date, topK) -> List.of(), 5, 0, 0);
+
+        var result = retriever.retrieve("《示例政策》第二十四条规定什么？", AS_OF);
+
+        assertThat(result.hits()).singleElement().satisfies(hit -> {
+            assertThat(hit.match().chunk().chunkId()).isEqualTo("right");
+            assertThat(hit.matchType()).isEqualTo(MatchType.EXACT);
+        });
+    }
+    @Test
     void rebuildReadsCanonicalChunksEmbedsThemAndReplacesDerivedIndex() {
         StoredChunk first = stored("one", null, ChunkType.ARTICLE, true, "第四十四条", "规则一");
         StoredChunk second = stored("two", null, ChunkType.ARTICLE, true, "第四十五条", "规则二");

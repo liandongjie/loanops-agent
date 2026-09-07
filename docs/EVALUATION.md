@@ -145,3 +145,9 @@ Phase 7.0 pre-RAG baseline
 
 This makes regressions in Tool selection, factual grounding, stateful context and read-only behavior
 visible when retrieval context is introduced.
+
+## Policy RAG evaluation
+
+Phase 7.4 adds a separate fixed Gold corpus, real BGE-M3/Qdrant evaluation, E0/E1 reports and a
+representative DeepSeek grounding review. Metric definitions and commands are documented in
+`docs/POLICY_RAG_EVALUATION.md`; this does not replace the five-case Agent baseline above.

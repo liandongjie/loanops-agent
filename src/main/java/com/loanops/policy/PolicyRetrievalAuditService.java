@@ -32,7 +32,7 @@ public class PolicyRetrievalAuditService {
             JdbcTemplate jdbc,
             AuditTimeProvider timeProvider,
             @Value("${loanops.policy.retrieval-top-k:5}") int topK,
-            @Value("${loanops.policy.runtime.score-threshold:0.0}") double threshold,
+            @Value("${loanops.policy.runtime.score-threshold:0.60}") double threshold,
             @Value("${spring.ai.ollama.embedding.model:bge-m3}") String embeddingModel,
             @Value("${loanops.policy.qdrant.collection:loanops_policy_chunks}") String collection,
             @Value("${loanops.policy.runtime.context-max-evidence:5}") int maxEvidence,
