@@ -9,6 +9,11 @@ import com.loanops.dto.AgentChatResult;
 import com.loanops.exception.ConversationConflictException;
 import com.loanops.exception.InvalidAgentMessageException;
 import com.loanops.observability.AgentMetrics;
+import com.loanops.policy.PolicyGroundingContextFactory;
+import com.loanops.policy.PolicyRetrievalDecision;
+import com.loanops.policy.PolicyRetrievalStatus;
+import com.loanops.policy.PolicyRuntimePreparation;
+import com.loanops.policy.PolicyRuntimeService;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.slf4j.MDC;
@@ -30,6 +35,7 @@ public class LoanOpsAgentService {
     private final AgentTurnCompletionService completionService;
     private final ConversationTurnStore turnStore;
     private final AgentMetrics metrics;
+    private final PolicyRuntimeService policyRuntimeService;
     private final String provider;
     private final String model;
 
@@ -39,6 +45,7 @@ public class LoanOpsAgentService {
             AgentTurnCompletionService completionService,
             ConversationTurnStore turnStore,
             AgentMetrics metrics,
+            PolicyRuntimeService policyRuntimeService,
             @Value("${loanops.agent.provider:unknown}") String provider,
             @Value("${loanops.agent.model:unknown}") String model) {
         this.chatGateway = chatGateway;
@@ -46,6 +53,7 @@ public class LoanOpsAgentService {
         this.completionService = completionService;
         this.turnStore = turnStore;
         this.metrics = metrics;
+        this.policyRuntimeService = policyRuntimeService;
         this.provider = provider;
         this.model = model;
     }
@@ -92,16 +100,25 @@ public class LoanOpsAgentService {
             log.info("Agent request started requestId={} conversationId={} provider={} model={}",
                     requestId, snapshot.conversationId(), provider, model);
             try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
+                PolicyRuntimePreparation policyPreparation;
+                try {
+                    policyPreparation = policyRuntimeService.prepare(requestId, snapshot, message);
+                } catch (RuntimeException | Error policyFailure) {
+                    return failRequest(auditHandle, snapshot.conversationId(), policyFailure);
+                }
+
                 String answer;
                 try {
-                    answer = chatGateway.chat(snapshot.history(), message);
+                    if (policyPreparation.context().decision() == PolicyRetrievalDecision.REQUIRED
+                            && policyPreparation.context().retrievalStatus() == PolicyRetrievalStatus.NO_MATCH) {
+                        answer = PolicyGroundingContextFactory.NO_MATCH_NOTICE;
+                    } else {
+                        answer = chatGateway.chat(new AgentChatRequest(
+                                snapshot.history(), message, policyPreparation.context()));
+                    }
+                    answer = policyRuntimeService.validateAndRecord(answer, policyPreparation);
                 } catch (RuntimeException | Error modelFailure) {
-                    long durationMs = completeFailure(auditHandle, modelFailure);
-                    metrics.recordRequest("FAILED", durationMs);
-                    log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                            requestId, snapshot.conversationId(), provider, model, durationMs,
-                            modelFailure.getClass().getSimpleName());
-                    throw modelFailure;
+                    return failRequest(auditHandle, snapshot.conversationId(), modelFailure);
                 }
 
                 long durationMs;
@@ -140,7 +157,6 @@ public class LoanOpsAgentService {
             String systemPrompt,
             long requestStartedNanos) {
         try {
-            // Fail closed: the remote Agent is never invoked unless STARTED is committed first.
             return snapshot == null
                     ? auditService.begin(requestId, message)
                     : auditService.begin(requestId, message, snapshot, systemPrompt);
@@ -153,15 +169,23 @@ public class LoanOpsAgentService {
         }
     }
 
-    private void failBeforeModel(
-            AgentAuditHandle auditHandle,
-            InvalidAgentMessageException validationFailure) {
+    private void failBeforeModel(AgentAuditHandle auditHandle, InvalidAgentMessageException validationFailure) {
         long durationMs = completeFailure(auditHandle, validationFailure);
         metrics.recordRequest("FAILED", durationMs);
         log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
                 auditHandle.requestId(), provider, model, durationMs,
                 validationFailure.getClass().getSimpleName());
         throw validationFailure;
+    }
+
+    private AgentChatResult failRequest(AgentAuditHandle auditHandle, String conversationId, Throwable failure) {
+        long durationMs = completeFailure(auditHandle, failure);
+        metrics.recordRequest("FAILED", durationMs);
+        log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                auditHandle.requestId(), conversationId, provider, model, durationMs,
+                failure.getClass().getSimpleName());
+        if (failure instanceof RuntimeException runtimeException) throw runtimeException;
+        throw (Error) failure;
     }
 
     private long completeFailure(AgentAuditHandle auditHandle, Throwable failure) {

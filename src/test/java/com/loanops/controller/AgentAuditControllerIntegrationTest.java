@@ -32,6 +32,7 @@ class AgentAuditControllerIntegrationTest {
     @BeforeEach
     void clearAuditRows() {
         jdbcTemplate.update("DELETE FROM agent_tool_audit_log");
+        jdbcTemplate.update("DELETE FROM conversation_message");
         jdbcTemplate.update("DELETE FROM agent_audit_log");
     }
 

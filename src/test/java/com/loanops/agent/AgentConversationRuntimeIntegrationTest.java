@@ -33,7 +33,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.never;
@@ -84,13 +84,16 @@ class AgentConversationRuntimeIntegrationTest {
 
     @BeforeEach
     void cleanAndConfigureGateway() {
+        jdbcTemplate.update("DELETE FROM policy_retrieval_hit");
+        jdbcTemplate.update("DELETE FROM policy_retrieval_audit");
         jdbcTemplate.update("DELETE FROM agent_tool_audit_log");
         jdbcTemplate.update("DELETE FROM conversation_message");
         jdbcTemplate.update("DELETE FROM agent_audit_log");
         jdbcTemplate.update("DELETE FROM conversation");
         when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
-        when(gateway.chat(anyList(), anyString()))
-                .thenAnswer(invocation -> "answer:" + invocation.getArgument(1, String.class));
+        when(gateway.chat(any()))
+                .thenAnswer(invocation -> "answer:"
+                        + invocation.getArgument(0, AgentChatRequest.class).currentUserMessage());
     }
 
     @Test
@@ -108,10 +111,10 @@ class AgentConversationRuntimeIntegrationTest {
         assertThat(first.conversationId()).isEqualTo(second.conversationId());
         assertThat(first.requestId()).isEqualTo(firstRequestId);
         assertThat(second.requestId()).isEqualTo(secondRequestId);
-        ArgumentCaptor<List<ConversationHistoryMessage>> histories = ArgumentCaptor.forClass(List.class);
-        verify(gateway, org.mockito.Mockito.times(2)).chat(histories.capture(), anyString());
-        assertThat(histories.getAllValues().get(0)).isEmpty();
-        assertThat(histories.getAllValues().get(1))
+        ArgumentCaptor<AgentChatRequest> requests = ArgumentCaptor.forClass(AgentChatRequest.class);
+        verify(gateway, org.mockito.Mockito.times(2)).chat(requests.capture());
+        assertThat(requests.getAllValues().get(0).history()).isEmpty();
+        assertThat(requests.getAllValues().get(1).history())
                 .extracting(ConversationHistoryMessage::sequenceNo,
                         ConversationHistoryMessage::role,
                         ConversationHistoryMessage::content)
@@ -151,23 +154,27 @@ class AgentConversationRuntimeIntegrationTest {
 
         service.chatWithRequestId(UUID.randomUUID().toString(), first.conversationId(), "question-4");
 
-        ArgumentCaptor<List<ConversationHistoryMessage>> history = ArgumentCaptor.forClass(List.class);
-        verify(gateway).chat(history.capture(), org.mockito.ArgumentMatchers.eq("question-4"));
-        assertThat(history.getValue())
+        ArgumentCaptor<AgentChatRequest> request = ArgumentCaptor.forClass(AgentChatRequest.class);
+        verify(gateway).chat(request.capture());
+        assertThat(request.getValue().currentUserMessage()).isEqualTo("question-4");
+        assertThat(request.getValue().history())
                 .extracting(ConversationHistoryMessage::sequenceNo)
                 .containsExactly(3, 4, 5, 6);
 
         clearInvocations(gateway);
         service.chatWithRequestId(UUID.randomUUID().toString(), null, "conversation-b");
-        verify(gateway).chat(history.capture(), org.mockito.ArgumentMatchers.eq("conversation-b"));
-        assertThat(history.getValue()).isEmpty();
+        verify(gateway).chat(request.capture());
+        assertThat(request.getValue().currentUserMessage()).isEqualTo("conversation-b");
+        assertThat(request.getValue().history()).isEmpty();
     }
 
     @Test
     void providerFailureLeavesFailedAuditAndNoConversationMessages() {
         String requestId = UUID.randomUUID().toString();
         RuntimeException providerFailure = new RuntimeException("provider unavailable");
-        when(gateway.chat(anyList(), anyString())).thenThrow(providerFailure);
+        org.mockito.Mockito.reset(gateway);
+        when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
+        when(gateway.chat(any())).thenThrow(providerFailure);
 
         assertThatThrownBy(() -> service.chatWithRequestId(requestId, null, "question"))
                 .isSameAs(providerFailure);
@@ -181,7 +188,9 @@ class AgentConversationRuntimeIntegrationTest {
     @Test
     void toolFailureKeepsRequestCorrelationButAppendsNoConversationMessages() {
         String requestId = UUID.randomUUID().toString();
-        when(gateway.chat(anyList(), anyString())).thenAnswer(invocation -> {
+        org.mockito.Mockito.reset(gateway);
+        when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
+        when(gateway.chat(any())).thenAnswer(invocation -> {
             tools.getCurrentRepayment("LN-NOT-FOUND");
             return "unreachable";
         });
@@ -203,7 +212,9 @@ class AgentConversationRuntimeIntegrationTest {
         ConversationSnapshot initial = turnStore.create();
         String staleRequestId = UUID.randomUUID().toString();
         String winningRequestId = UUID.randomUUID().toString();
-        when(gateway.chat(anyList(), anyString())).thenAnswer(invocation -> {
+        org.mockito.Mockito.reset(gateway);
+        when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
+        when(gateway.chat(any())).thenAnswer(invocation -> {
             ConversationSnapshot competingSnapshot = turnStore.resolve(initial.conversationId());
             AgentAuditHandle competingAudit = auditService.begin(
                     winningRequestId, "winning question", competingSnapshot, SYSTEM_PROMPT);

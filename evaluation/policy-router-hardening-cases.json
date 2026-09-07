@@ -1,0 +1,29 @@
+{
+  "cases": [
+    {"id":"implicit-required-001","history":[],"message":"借款人短期资金周转困难，想延后到期日，需要履行什么程序？","expectedDecision":"REQUIRED"},
+    {"id":"implicit-required-002","history":[],"message":"贷款已经全部付清但抵押登记还挂着，机构应该做什么？","expectedDecision":"REQUIRED"},
+    {"id":"implicit-required-003","history":[],"message":"能不能只根据晚还了几天就认定贷款资产类别？","expectedDecision":"REQUIRED"},
+    {"id":"implicit-required-004","history":[],"message":"把催款工作交给外部公司后，银行还要怎样管控？","expectedDecision":"REQUIRED"},
+    {"id":"implicit-required-005","history":[],"message":"贷款还清后需要出具什么并办理什么手续？","expectedDecision":"REQUIRED"},
+    {"id":"implicit-required-006","history":[],"message":"委托第三方催收后，贷款机构需要如何监督？","expectedDecision":"REQUIRED"},
+
+    {"id":"implicit-supplemental-current-001","history":[],"message":"LN-10001 结清后应该办理哪些手续？","expectedDecision":"SUPPLEMENTAL"},
+    {"id":"implicit-supplemental-current-002","history":[],"message":"LN-10002 能不能仅凭逾期天数认定风险分类？","expectedDecision":"SUPPLEMENTAL"},
+    {"id":"implicit-supplemental-prior-001","history":[{"role":"USER","content":"请查询 LN-10002 的逾期情况"},{"role":"ASSISTANT","content":"已查询"}],"message":"接下来需要采取哪些处置措施？","expectedDecision":"SUPPLEMENTAL"},
+    {"id":"implicit-supplemental-prior-002","history":[{"role":"USER","content":"LN-10003 已经还清了吗？"}],"message":"如果还清，应该出具什么证明？","expectedDecision":"SUPPLEMENTAL"},
+
+    {"id":"financial-near-negative-001","history":[],"message":"LN-10001 当前应该还多少钱？","expectedDecision":"NOT_REQUIRED"},
+    {"id":"financial-near-negative-002","history":[],"message":"能不能告诉我 LN-10002 逾期几天？","expectedDecision":"NOT_REQUIRED"},
+    {"id":"financial-near-negative-003","history":[],"message":"LN-10003 是否已经结清？","expectedDecision":"NOT_REQUIRED"},
+    {"id":"financial-near-negative-004","history":[],"message":"LN-10001 需要还多少本金？","expectedDecision":"NOT_REQUIRED"},
+    {"id":"financial-near-negative-005","history":[],"message":"LN-10002 应该在哪天还款？","expectedDecision":"NOT_REQUIRED"},
+    {"id":"financial-near-negative-006","history":[],"message":"请问 LN-10003 可以查询到结清状态吗？","expectedDecision":"NOT_REQUIRED"},
+
+    {"id":"explicit-required-001","history":[],"message":"个人贷款逾期后按规定如何处置？","expectedDecision":"REQUIRED"},
+    {"id":"reference-required-001","history":[],"message":"EVAL-POST-2026 第四十四条说了什么？","expectedDecision":"REQUIRED"},
+    {"id":"reference-required-002","history":[],"message":"《客户权益评测规程》第二十四条是什么内容？","expectedDecision":"REQUIRED"},
+    {"id":"explicit-supplemental-001","history":[],"message":"LN-10003 按制度还需要办理什么手续？","expectedDecision":"SUPPLEMENTAL"},
+    {"id":"assistant-context-required-001","history":[{"role":"USER","content":"贷款逾期了"},{"role":"ASSISTANT","content":"已查询 LN-10002"}],"message":"接下来应该办理哪些手续？","expectedDecision":"REQUIRED"},
+    {"id":"assistant-context-not-required-001","history":[{"role":"ASSISTANT","content":"LN-10001 当前应还 3500 元"}],"message":"能不能告诉我逾期几天？","expectedDecision":"NOT_REQUIRED"}
+  ]
+}
