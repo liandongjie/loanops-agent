@@ -2,15 +2,13 @@
 
 ## 1. 当前结论
 
-当前版本把 **DeepSeek** 和 **Ollama / qwen3:4b** 标记为已通过真实 Tool Calling E2E 验证的 Chat Provider。
-
-GLM 只定义接入边界，不在没有真实验收的情况下写成“已支持”。
+当前版本把 **DeepSeek**、**Ollama / qwen3:4b** 和 **GLM / glm-5.2** 标记为已通过真实 Tool Calling E2E 验证的 Chat Provider。
 
 | Provider | 接入方式 | 当前状态 | 需要的验收 |
 |---|---|---|---|
 | DeepSeek | Spring AI DeepSeek ChatModel | 已接入 | 已完成 3 个固定 Agent Case |
 | Ollama | Spring AI Ollama ChatModel（`qwen3:4b`） | 已完成 Tool Calling 与 Policy Hero 验证 | 已完成 5-case baseline、unknown-loan 与 Policy Hero |
-| GLM | OpenAI-compatible Chat API（计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
+| GLM | Spring AI ZhiPuAI ChatModel（`glm-5.2`） | 已完成 Tool Calling 与 Policy Hero 验证 | 已完成 5-case baseline、unknown-loan 与 Policy Hero |
 
 ## 2. Provider 不应该影响什么
 
@@ -31,7 +29,7 @@ A1 只建立配置基础设施，不代表新增 Provider 已接入或已验证�
 
 ```text
 LOANOPS_CHAT_PROVIDER = deepseek | ollama | glm
-LOANOPS_CHAT_ADAPTER  = deepseek | ollama | openai
+LOANOPS_CHAT_ADAPTER  = deepseek | ollama | zhipuai
 LOANOPS_CHAT_MODEL    = 实际模型名称
 ```
 
@@ -40,7 +38,7 @@ Provider 与 Spring AI ChatModel Adapter 的固定映射为：
 ```text
 deepseek -> deepseek
 ollama  -> ollama
-glm     -> openai
+glm     -> zhipuai
 ```
 
 默认值仍为 `deepseek / deepseek / deepseek-chat`。项目根目录的 `.env` 通过 Spring Boot Config Data 作为 properties 文件加载；命令行、系统属性和操作系统环境变量仍按 Spring Boot 原生优先级覆盖它。`.env` 保持 gitignored，示例文件只保存安全 placeholder。
@@ -97,19 +95,19 @@ QWEN_MODEL
 - https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope
 - https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling
 
-## 6. GLM 扩展路径
+## 6. GLM / glm-5.2
 
-智谱 Chat Completions API 使用 Bearer API Key，GLM 系列支持 Function Calling。后续同样优先复用 OpenAI-compatible Adapter，不复制 Agent 业务层。
-
-建议 Provider 配置字段：
+当前 A3 运行身份为：
 
 ```text
-GLM_API_KEY
-GLM_BASE_URL=https://open.bigmodel.cn/api/paas/v4
-GLM_MODEL
+Provider = glm
+Adapter  = zhipuai
+Model    = glm-5.2
 ```
 
-部分 GLM 模型/模式存在工具调用特有参数，接入时必须以所选模型当期官方文档为准，并通过真实 E2E 验证，不能只以“接口兼容”推断 Tool Calling 一定兼容。
+项目使用 Spring AI 1.1.1 原生 `ZhiPuAiChatModel` 和智谱标准开放平台 endpoint；`GLM_API_KEY` 是唯一新增的 Provider Secret，model 继续由 `LOANOPS_CHAT_MODEL` 控制。该路径已完成真实 5-case baseline、unknown-loan 与 Policy Hero，实际 Agent Audit 为 `provider=glm`、`model=glm-5.2`，Policy retrieval audit 的 embedding model 仍为 `bge-m3`。
+
+不同时保留 GLM OpenAI-compatible adapter；`glm / openai` 会在配置边界 fail-fast。
 
 官方参考：
 

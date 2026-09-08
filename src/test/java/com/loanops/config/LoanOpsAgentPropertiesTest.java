@@ -18,7 +18,7 @@ class LoanOpsAgentPropertiesTest {
     @CsvSource({
             "deepseek, deepseek",
             "ollama, ollama",
-            "glm, openai"
+            "glm, zhipuai"
     })
     void acceptsFrozenProviderAdapterMappings(String provider, String adapter) {
         contextRunner.withPropertyValues(
@@ -34,8 +34,8 @@ class LoanOpsAgentPropertiesTest {
 
     @ParameterizedTest
     @CsvSource({
-            "glm, glm, glm -> openai",
-            "glm, deepseek, glm -> openai",
+            "glm, openai, glm -> zhipuai",
+            "glm, deepseek, glm -> zhipuai",
             "deepseek, openai, deepseek -> deepseek"
     })
     void rejectsInvalidProviderAdapterMappings(String provider, String adapter, String expectedMapping) {

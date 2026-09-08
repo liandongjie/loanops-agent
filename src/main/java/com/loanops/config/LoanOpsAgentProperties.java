@@ -16,7 +16,7 @@ public record LoanOpsAgentProperties(String provider, String adapter, String mod
         String expectedAdapter = switch (provider) {
             case "deepseek" -> "deepseek";
             case "ollama" -> "ollama";
-            case "glm" -> "openai";
+            case "glm" -> "zhipuai";
             default -> throw new IllegalArgumentException("Unknown loanops.agent.provider: '" + provider + "'");
         };
         if (!expectedAdapter.equals(adapter)) {

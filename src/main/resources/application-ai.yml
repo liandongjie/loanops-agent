@@ -17,3 +17,8 @@ spring:
       chat:
         options:
           model: ${loanops.agent.model}
+    zhipuai:
+      api-key: ${GLM_API_KEY}
+      chat:
+        options:
+          model: ${loanops.agent.model}
