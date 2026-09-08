@@ -9,7 +9,7 @@ Qwen 和 GLM 只定义接入边界，不在没有真实验收的情况下写成�
 | Provider | 接入方式 | 当前状态 | 需要的验收 |
 |---|---|---|---|
 | DeepSeek | Spring AI DeepSeek ChatModel | 已接入 | 已完成 3 个固定 Agent Case |
-| Qwen | OpenAI-compatible Chat API（计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
+| Qwen | Ollama ChatModel（A2 计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
 | GLM | OpenAI-compatible Chat API（计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
 
 ## 2. Provider 不应该影响什么
@@ -25,13 +25,37 @@ Qwen 和 GLM 只定义接入边界，不在没有真实验收的情况下写成�
 
 Provider 的变化只应落在 Spring AI 模型依赖、连接配置和少量 Provider 特有参数上。
 
-## 3. DeepSeek
+## 3. A1 配置契约
+
+A1 只建立配置基础设施，不代表新增 Provider 已接入或已验证。
+
+```text
+LOANOPS_CHAT_PROVIDER = deepseek | ollama | glm
+LOANOPS_CHAT_ADAPTER  = deepseek | ollama | openai
+LOANOPS_CHAT_MODEL    = 实际模型名称
+```
+
+Provider 与 Spring AI ChatModel Adapter 的固定映射为：
+
+```text
+deepseek -> deepseek
+ollama  -> ollama
+glm     -> openai
+```
+
+默认值仍为 `deepseek / deepseek / deepseek-chat`。项目根目录的 `.env` 通过 Spring Boot Config Data 作为 properties 文件加载；命令行、系统属性和操作系统环境变量仍按 Spring Boot 原生优先级覆盖它。`.env` 保持 gitignored，示例文件只保存安全 placeholder。
+
+Chat 的 provider / adapter / model 与 Policy Embedding 的 `ollama / bge-m3` 是两个独立配置维度。
+
+## 4. DeepSeek
 
 当前配置：
 
 ```text
 DEEPSEEK_API_KEY
-DEEPSEEK_MODEL=deepseek-chat
+LOANOPS_CHAT_PROVIDER=deepseek
+LOANOPS_CHAT_ADAPTER=deepseek
+LOANOPS_CHAT_MODEL=deepseek-chat
 ```
 
 Spring profile：
@@ -48,11 +72,19 @@ LN-10002 -> getOverdueDiagnosis
 LN-10003 -> getSettlementStatus
 ```
 
-## 4. Qwen 扩展路径
+## 5. Qwen 扩展路径
 
-阿里云 Model Studio 提供 OpenAI-compatible Chat API，并支持 Function Calling。接入时优先复用 Spring AI OpenAI ChatModel，而不是新增一个 `QwenLoanOpsAgentService`。
+当前 A2 计划路径为：
 
-建议 Provider 配置字段：
+```text
+Provider = ollama
+Adapter  = ollama
+Model    = qwen3:4b
+```
+
+该路径将在后续 A2 实现并进行真实 Tool Calling 验收；A1 不把 Qwen 标记为已接入或已验证。
+
+Alibaba Model Studio / OpenAI-compatible Qwen 仅保留为 future alternative，不是当前 A2 实施路径。若未来单独批准该路径，再评估以下配置：
 
 ```text
 QWEN_API_KEY / DASHSCOPE_API_KEY
@@ -67,7 +99,7 @@ QWEN_MODEL
 - https://www.alibabacloud.com/help/en/model-studio/compatibility-of-openai-with-dashscope
 - https://www.alibabacloud.com/help/en/model-studio/qwen-function-calling
 
-## 5. GLM 扩展路径
+## 6. GLM 扩展路径
 
 智谱 Chat Completions API 使用 Bearer API Key，GLM 系列支持 Function Calling。后续同样优先复用 OpenAI-compatible Adapter，不复制 Agent 业务层。
 
@@ -86,7 +118,7 @@ GLM_MODEL
 - https://docs.bigmodel.cn/api-reference/模型-api/对话补全
 - https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2
 
-## 6. 验收原则
+## 7. 验收原则
 
 任何新 Provider 必须复用同一套业务事实，并至少通过：
 

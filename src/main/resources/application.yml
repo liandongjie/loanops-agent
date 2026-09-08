@@ -1,4 +1,6 @@
 spring:
+  config:
+    import: "optional:file:./.env[.properties]"
   http:
     client:
       connect-timeout: ${LOANOPS_HTTP_CONNECT_TIMEOUT:5s}
@@ -50,6 +52,9 @@ management:
 
 loanops:
   agent:
+    provider: ${LOANOPS_CHAT_PROVIDER:deepseek}
+    adapter: ${LOANOPS_CHAT_ADAPTER:deepseek}
+    model: ${LOANOPS_CHAT_MODEL:deepseek-chat}
     max-message-characters: ${LOANOPS_AGENT_MAX_MESSAGE_CHARACTERS:4000}
   audit:
     include-content: false

@@ -1,6 +1,7 @@
 package com.loanops.audit;
 
 import com.baomidou.mybatisplus.core.conditions.update.LambdaUpdateWrapper;
+import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.conversation.ConversationHistoryMessage;
 import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.dto.AgentAuditResponse;
@@ -10,7 +11,6 @@ import com.loanops.persistence.entity.AgentAuditLogEntity;
 import com.loanops.persistence.entity.AgentToolAuditLogEntity;
 import com.loanops.persistence.mapper.AgentAuditLogMapper;
 import com.loanops.persistence.mapper.AgentToolAuditLogMapper;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +28,7 @@ public class AgentAuditService {
     private final AuditContentPolicy contentPolicy;
     private final AuditTimeProvider timeProvider;
     private final Clock businessClock;
-    private final String provider;
-    private final String model;
+    private final LoanOpsAgentProperties agentProperties;
 
     public AgentAuditService(
             AgentAuditLogMapper auditMapper,
@@ -37,15 +36,13 @@ public class AgentAuditService {
             AuditContentPolicy contentPolicy,
             AuditTimeProvider timeProvider,
             Clock businessClock,
-            @Value("${loanops.agent.provider:unknown}") String provider,
-            @Value("${loanops.agent.model:unknown}") String model) {
+            LoanOpsAgentProperties agentProperties) {
         this.auditMapper = auditMapper;
         this.toolAuditMapper = toolAuditMapper;
         this.contentPolicy = contentPolicy;
         this.timeProvider = timeProvider;
         this.businessClock = businessClock;
-        this.provider = normalizeMetadata(provider, 32);
-        this.model = normalizeMetadata(model, 128);
+        this.agentProperties = agentProperties;
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
@@ -177,8 +174,8 @@ public class AgentAuditService {
         entity.setStartedAt(timeProvider.nowUtc());
         entity.setStatus("STARTED");
         entity.setBusinessDate(LocalDate.now(businessClock));
-        entity.setProvider(provider);
-        entity.setModel(model);
+        entity.setProvider(agentProperties.provider());
+        entity.setModel(agentProperties.model());
         entity.setMessageLength(snapshot.length());
         entity.setMessageHash(snapshot.sha256());
         entity.setMessageText(snapshot.content());
@@ -228,11 +225,6 @@ public class AgentAuditService {
         if (count != 1) {
             throw new IllegalStateException("agent audit is not in STARTED state: " + requestId);
         }
-    }
-
-    private static String normalizeMetadata(String value, int maxLength) {
-        String normalized = value == null || value.isBlank() ? "unknown" : value.trim();
-        return normalized.length() <= maxLength ? normalized : normalized.substring(0, maxLength);
     }
 
     private static String errorType(Throwable failure) {

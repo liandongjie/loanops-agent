@@ -194,6 +194,8 @@ function Run-SingleTurnCase($Case) {
         return Finish-Case ([string]$Case.id) ([string]$Case.category) $checks @{
             requestId = [string]$response.requestId
             conversationId = [string]$response.conversationId
+            provider = [string]$audit.provider
+            model = [string]$audit.model
             durationMs = [long]$audit.durationMs
             systemPromptHash = [string]$audit.systemPromptHash
             observedTools = @($audit.tools | ForEach-Object { "$($_.toolName):$($_.loanNo):$($_.status)" })
@@ -225,6 +227,8 @@ function Run-ReadOnlyGuardCase($Case) {
         return Finish-Case ([string]$Case.id) ([string]$Case.category) $checks @{
             requestId = [string]$response.requestId
             conversationId = [string]$response.conversationId
+            provider = [string]$audit.provider
+            model = [string]$audit.model
             durationMs = [long]$audit.durationMs
             systemPromptHash = [string]$audit.systemPromptHash
             observedTools = @($audit.tools | ForEach-Object { "$($_.toolName):$($_.loanNo):$($_.status)" })
@@ -257,6 +261,8 @@ function Run-StatefulCase($Case) {
             requestId = [string]$turn2.requestId
             turn1RequestId = [string]$turn1.requestId
             conversationId = [string]$turn2.conversationId
+            provider = [string]$audit2.provider
+            model = [string]$audit2.model
             durationMs = [long]$audit2.durationMs
             systemPromptHash = [string]$audit2.systemPromptHash
             historyHash = [string]$audit2.historyHash
@@ -314,7 +320,8 @@ if ($ValidateOnly) {
 $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 $outputDirectory = Join-Path (Get-Location) "target/evaluation"
 $head = (git rev-parse HEAD).Trim()
-$model = if ($env:DEEPSEEK_MODEL) { $env:DEEPSEEK_MODEL } else { "deepseek-chat" }
+$provider = "deepseek"
+$model = if ($env:LOANOPS_CHAT_MODEL) { $env:LOANOPS_CHAT_MODEL } else { "deepseek-chat" }
 
 if (-not $UseExistingApp -and [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
     $blocked = [pscustomobject]@{
@@ -323,7 +330,7 @@ if (-not $UseExistingApp -and [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY
         outcome = "ENV_BLOCKED"
         reason = "DEEPSEEK_API_KEY is not available in this process environment"
         repositoryHead = $head
-        provider = "deepseek"
+        provider = $provider
         model = $model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone
@@ -394,6 +401,10 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
             default { throw "Unsupported case type: $($case.type)" }
         }
         [void]$results.Add($result)
+        if ($result.PSObject.Properties.Name -contains "provider") {
+            $provider = [string]$result.provider
+            $model = [string]$result.model
+        }
     }
 
     $passed = @($results | Where-Object { $_.status -eq "PASS" }).Count
@@ -407,7 +418,7 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
         generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
         outcome = $overallOutcome
         repositoryHead = $head
-        provider = "deepseek"
+        provider = $provider
         model = $model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone
@@ -430,7 +441,7 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
         outcome = "ERROR"
         reason = $_.Exception.Message
         repositoryHead = $head
-        provider = "deepseek"
+        provider = $provider
         model = $model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone

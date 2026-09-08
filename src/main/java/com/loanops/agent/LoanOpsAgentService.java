@@ -3,6 +3,7 @@ package com.loanops.agent;
 import com.loanops.audit.AgentAuditHandle;
 import com.loanops.audit.AgentAuditService;
 import com.loanops.audit.AgentRequestAuditContext;
+import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.conversation.ConversationTurnStore;
 import com.loanops.dto.AgentChatResult;
@@ -36,8 +37,7 @@ public class LoanOpsAgentService {
     private final ConversationTurnStore turnStore;
     private final AgentMetrics metrics;
     private final PolicyRuntimeService policyRuntimeService;
-    private final String provider;
-    private final String model;
+    private final LoanOpsAgentProperties agentProperties;
     private final int maxMessageCharacters;
 
     public LoanOpsAgentService(
@@ -47,8 +47,7 @@ public class LoanOpsAgentService {
             ConversationTurnStore turnStore,
             AgentMetrics metrics,
             PolicyRuntimeService policyRuntimeService,
-            @Value("${loanops.agent.provider:unknown}") String provider,
-            @Value("${loanops.agent.model:unknown}") String model,
+            LoanOpsAgentProperties agentProperties,
             @Value("${loanops.agent.max-message-characters:4000}") int maxMessageCharacters) {
         if (maxMessageCharacters < 1) {
             throw new IllegalArgumentException("Agent message character limit must be positive");
@@ -59,8 +58,7 @@ public class LoanOpsAgentService {
         this.turnStore = turnStore;
         this.metrics = metrics;
         this.policyRuntimeService = policyRuntimeService;
-        this.provider = provider;
-        this.model = model;
+        this.agentProperties = agentProperties;
         this.maxMessageCharacters = maxMessageCharacters;
     }
 
@@ -100,7 +98,7 @@ public class LoanOpsAgentService {
                 long durationMs = elapsedMillis(requestStartedNanos);
                 metrics.recordRequest("FAILED", durationMs);
                 log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                        requestId, conversationId, provider, model, durationMs,
+                        requestId, conversationId, agentProperties.provider(), agentProperties.model(), durationMs,
                         conversationFailure.getClass().getSimpleName());
                 throw conversationFailure;
             }
@@ -110,7 +108,7 @@ public class LoanOpsAgentService {
                     requestId, auditableMessage, snapshot, systemPrompt, requestStartedNanos);
 
             log.info("Agent request started requestId={} conversationId={} provider={} model={}",
-                    requestId, snapshot.conversationId(), provider, model);
+                    requestId, snapshot.conversationId(), agentProperties.provider(), agentProperties.model());
             try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
                 PolicyRuntimePreparation policyPreparation;
                 try {
@@ -140,7 +138,7 @@ public class LoanOpsAgentService {
                     durationMs = completeFailure(auditHandle, conflict);
                     metrics.recordRequest("FAILED", durationMs);
                     log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                            requestId, snapshot.conversationId(), provider, model, durationMs,
+                            requestId, snapshot.conversationId(), agentProperties.provider(), agentProperties.model(), durationMs,
                             conflict.getClass().getSimpleName());
                     throw conflict;
                 } catch (RuntimeException | Error completionFailure) {
@@ -154,7 +152,7 @@ public class LoanOpsAgentService {
 
                 metrics.recordRequest("SUCCESS", durationMs);
                 log.info("Agent request completed requestId={} conversationId={} outcome=SUCCESS provider={} model={} durationMs={}",
-                        requestId, snapshot.conversationId(), provider, model, durationMs);
+                        requestId, snapshot.conversationId(), agentProperties.provider(), agentProperties.model(), durationMs);
                 return new AgentChatResult(snapshot.conversationId(), requestId, answer);
             }
         } finally {
@@ -185,7 +183,7 @@ public class LoanOpsAgentService {
         long durationMs = completeFailure(auditHandle, validationFailure);
         metrics.recordRequest("FAILED", durationMs);
         log.info("Agent request completed requestId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                auditHandle.requestId(), provider, model, durationMs,
+                auditHandle.requestId(), agentProperties.provider(), agentProperties.model(), durationMs,
                 validationFailure.getClass().getSimpleName());
         throw validationFailure;
     }
@@ -194,7 +192,7 @@ public class LoanOpsAgentService {
         long durationMs = completeFailure(auditHandle, failure);
         metrics.recordRequest("FAILED", durationMs);
         log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                auditHandle.requestId(), conversationId, provider, model, durationMs,
+                auditHandle.requestId(), conversationId, agentProperties.provider(), agentProperties.model(), durationMs,
                 failure.getClass().getSimpleName());
         if (failure instanceof RuntimeException runtimeException) throw runtimeException;
         throw (Error) failure;

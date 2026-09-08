@@ -1,5 +1,6 @@
 package com.loanops.audit;
 
+import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.dto.AgentAuditResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -12,11 +13,19 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties = "loanops.business-date=2026-08-23")
+@SpringBootTest(properties = {
+        "loanops.business-date=2026-08-23",
+        "loanops.agent.provider=ollama",
+        "loanops.agent.adapter=ollama",
+        "loanops.agent.model=audit-test-model"
+})
 class AgentAuditPersistenceIntegrationTest {
 
     @Autowired
     private AgentAuditService auditService;
+
+    @Autowired
+    private LoanOpsAgentProperties agentProperties;
 
     @Autowired
     private JdbcTemplate jdbcTemplate;
@@ -37,6 +46,8 @@ class AgentAuditPersistenceIntegrationTest {
         AgentAuditResponse started = auditService.get(requestId);
         assertThat(started.status()).isEqualTo("STARTED");
         assertThat(started.businessDate()).isEqualTo(LocalDate.of(2026, 8, 23));
+        assertThat(started.provider()).isEqualTo(agentProperties.provider());
+        assertThat(started.model()).isEqualTo(agentProperties.model());
         assertThat(started.messageLength()).isEqualTo(message.length());
         assertThat(started.messageHash()).hasSize(64);
         assertThat(started.messageText()).isNull();

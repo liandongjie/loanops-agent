@@ -65,13 +65,13 @@ Requirements:
 - JDK 21 on the current `PATH`;
 - Maven 3.9+;
 - `DEEPSEEK_API_KEY` available only as an environment variable;
-- optional `DEEPSEEK_MODEL` (defaults to `deepseek-chat`).
+- optional `LOANOPS_CHAT_MODEL` (defaults to `deepseek-chat`).
 
 Example:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
-$env:DEEPSEEK_MODEL = "deepseek-chat"
+$env:LOANOPS_CHAT_MODEL = "deepseek-chat"
 
 .\scripts\evaluate-agent-baseline.ps1
 ```
