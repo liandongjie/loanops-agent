@@ -1,149 +1,192 @@
 # Architecture
 
-## 1. 设计目标
+## 1. Design Goal
 
-LoanOps Agent 的核心不是组件数量，而是把“确定性金融事实”和“概率型自然语言能力”分开。
+LoanOps Agent 的核心是隔离“确定性金融事实”和“概率型语言/政策回答”：
 
-- Java 领域层拥有金额、日期、逾期和结清规则；
-- REST 可以绕过 AI 独立验证业务事实；
-- Tool 只是业务能力的只读适配器；
-- Agent 只负责意图理解、Tool 选择和解释；
-- 数据库和模型 Provider 都属于可替换基础设施，不应改写核心业务算法。
+- Java 领域服务拥有金额、日期、逾期和结清规则；
+- MySQL 版本化 policy store 拥有政策文档、版本与 chunk metadata；
+- Qdrant 是可从 MySQL 重建的派生向量索引；
+- LLM 只负责理解问题、选择只读 Tool 和基于受控证据组织回答；
+- Citation Validator 与 Audit 提供独立于模型自律的硬边界和证据链。
 
-## 2. 当前运行链路
+REST 可以绕过 AI 验证金融事实。Policy RAG 不能修改贷款事实，Conversation 历史也不能替代 fresh Tool query。
 
-```mermaid
-graph LR
-    Client["API Client"] --> Rest["LoanStatusController"]
-    Client --> Agent["AgentController"]
-    Agent --> AgentService["LoanOpsAgentService"]
-    AgentService --> Gateway["AgentChatGateway"]
-    Gateway --> ChatClient["Spring AI ChatClient"]
-    ChatClient --> Model["DeepSeek"]
-    Model --> Tools["LoanOpsTools"]
-    Tools --> StatusService["LoanStatusService"]
-    AgentService --> Audit["AgentAuditService"]
-    Audit --> AuditTables["Audit tables"]
-    Rest --> StatusService
-    StatusService --> Diagnosis["LoanDiagnosisService"]
-    Diagnosis --> Calculator["RepaymentCalculator"]
-    StatusService --> Mapper["MyBatis-Plus Mappers"]
-    Mapper --> Database["H2 / MySQL"]
-```
+## 2. Current Request Flow
 
-## 3. 各层职责
+~~~mermaid
+flowchart TD
+    Client --> API[Agent API]
+    API --> Snapshot[Conversation Snapshot]
+    Snapshot --> Router[Policy Router]
+    Router --> Decision[Policy Decision]
 
-| 层 | 负责 | 不负责 |
-|---|---|---|
-| `RepaymentCalculator` | 应还、已还、未还的确定性金额计算 | 数据访问、LLM、HTTP |
-| `LoanDiagnosisService` | 当前期次、逾期、结清判断 | Mapper、Prompt |
-| `LoanStatusService` | 加载贷款数据并编排诊断 | 重新实现领域算法 |
-| `LoanStatusController` | 暴露确定性 REST API | 金额/逾期计算 |
-| `LoanOpsTools` | 把 Service 暴露成 3 个只读 AI Tool | 直接访问 Mapper、写数据库 |
-| `LoanOpsAgentService` | 请求关联、审计生命周期、Chat gateway、Tool Calling 编排 | 计算金融事实 |
-| Provider | 语言理解与回答生成 | 成为业务事实来源 |
+    subgraph FinancialFacts[Financial facts trust path]
+        Model[DeepSeek Tool Calling] --> Tools[LoanOpsTools]
+        Tools --> Service[Java deterministic services]
+        Service --> LoanData[(MySQL or H2 loan data)]
+    end
 
-## 4. 事实来源
+    subgraph PolicyEvidence[Policy evidence trust path]
+        Decision -->|SUPPLEMENTAL / REQUIRED| Query[Policy Query]
+        Query --> Canonical[(MySQL canonical policy store<br/>applicable versions and chunks)]
+        Canonical --> Exact[Exact-reference candidates]
+        Query --> Embedding[BGE-M3 query embedding]
+        Embedding --> Qdrant[(Qdrant rebuildable derived vector index)]
+        Qdrant --> Semantic[Semantic candidates]
+        Exact --> Merge
+        Semantic --> Merge
+        Merge[Retriever merge / rank / applicability filtering] --> RequiredNoMatch{REQUIRED + NO_MATCH?}
+        RequiredNoMatch -->|Yes| Abstain[Return no-match notice<br/>no model call]
+        RequiredNoMatch -->|No| Context[Grounding Context]
+        Context --> Model
+        Abstain --> Citation
+        Model --> Citation[Policy Citation Validation]
+    end
 
-业务规则只有一套实现路径：
+    Decision -->|NOT_REQUIRED| Model
+    Citation --> Answer[Answer]
+    Answer --> Commit[Conversation commit]
+    Answer --> Audit[Agent, Tool and Policy Audit]
+~~~
 
-```text
-RepaymentCalculator
-        ↓
-LoanDiagnosisService
-        ↓
-LoanStatusService
-      ↙     ↘
-   REST      Tool
-               ↓
-             Agent
-```
+运行顺序由 LoanOpsAgentService 编排：
 
-如果 REST 与 Agent 结果不一致，先用 REST / Service 测试验证 Java 事实，再排查 Tool Calling 或模型输出。这使 AI 故障和业务故障可以拆开定位。
+1. 校验当前消息长度；
+2. 创建或读取持久化 Conversation Snapshot；
+3. 写入 Agent Audit STARTED；
+4. PolicyRuntimeService 计算 NOT_REQUIRED / SUPPLEMENTAL / REQUIRED；
+5. 需要政策时构造 query、检索适用版本并建立 Grounding Context；
+6. SpringAiAgentChatGateway 把历史、政策上下文、当前问题和只读 Tools 交给 DeepSeek；
+7. PolicyCitationValidator 校验回答中的引用；
+8. 在同一完成事务中追加 USER / ASSISTANT，并将 Agent Audit 标记为 SUCCESS。
 
-## 5. 数据模型
+任何 Provider、Tool、必要政策检索、Citation 或 Conversation commit 失败，都不会留下伪成功 turn。
 
-贷款业务核心仍只有三张表；审计另有两张独立表：
+## 3. Two Trust Paths
 
-```text
-loan_contract
-    1
-    │
-    └── n repayment_plan
-              1
-              │
-            └── n payment_record
+### 3.1 Financial Facts
 
-agent_audit_log
-    1
-    │
-    └── n agent_tool_audit_log
-```
+~~~text
+DeepSeek Tool Calling
+  -> LoanOpsTools
+  -> LoanStatusService
+  -> LoanDiagnosisService
+  -> RepaymentCalculator
+  -> MySQL / H2 loan data
+~~~
 
-`OVERDUE`、`SETTLED` 不作为持久化真相保存，而是根据计划与还款记录动态计算，避免派生状态和基础数据不一致。
+RepaymentCalculator 使用 BigDecimal；LoanDiagnosisService 使用注入的 Clock。金额、日期、当前期次、逾期和结清不出现在 Prompt 算法中，也不由 Tool 重新实现。
 
-## 6. 时间与可复现性
+三个 Tool 均只读：
 
-领域代码只从注入的 `Clock` 获取业务日期。默认使用系统日期；演示与验收可以通过：
+- getCurrentRepayment
+- getOverdueDiagnosis
+- getSettlementStatus
 
-```text
-loanops.business-date=2026-08-23
-loanops.business-zone=Asia/Shanghai
-```
+如果 REST 与 Agent 输出冲突，先用 REST / Service 测试核对 Java 事实，再检查 Tool 选择或模型表达。
 
-生成固定 `Clock`，从而让 `LN-10002` 的 `overdueDays=3` 在未来仍可重复验证。
+### 3.2 Policy Evidence
 
-## 7. Provider 扩展点
+~~~text
+Policy Router
+  -> Policy Query
+  -> MySQL applicable versions / chunks
+       -> exact-reference candidates
+  -> BGE-M3 query embedding
+       -> Qdrant semantic candidates
+  -> merge / rank with applicable-chunk filtering
+  -> Grounding Context
+  -> DeepSeek
+  -> PolicyCitationValidator
+  -> Answer
+~~~
 
-Agent 依赖 Spring AI `ChatClient`，而不是在业务类中调用某个厂商 SDK。
+PolicyRetrievalDecisionEngine 是 deterministic Router：
 
-```text
-LoanOpsAgentService
-       ↓
- AgentChatGateway
-       ↓
-   ChatClient
-       ↓
-   ChatModel
-    /  |  \
-DeepSeek Qwen GLM
-```
+- NOT_REQUIRED：纯金融事实问题不运行政策检索；
+- SUPPLEMENTAL：贷款事实和政策依据需要组合；
+- REQUIRED：纯政策问题必须取得足够依据，否则 fail closed 或明确 abstain。
 
-当前只把 DeepSeek 作为已接入、已验证 Provider。Qwen/GLM 后续应通过独立配置/Adapter 接入，并复用同一套 3 个 Tool 和 E2E Case。详见 `PROVIDERS.md`。
+PolicyRetriever 先从 MySQL 取得业务日期适用的版本和 chunks，再合并 exact-reference 与 Qdrant dense retrieval。Qdrant 命中只有能映射回适用 MySQL chunk 时才可进入结果。
 
-## 8. 数据库扩展点
+PolicyIngestionService 将规范化文本、内容 hash、版本有效期和结构化 chunks 写入 MySQL。PolicyIndexRebuilder 从 MySQL 读取当前可索引 chunks，经 BGE-M3 生成 embeddings 后整体替换 Qdrant collection。因此：
 
-当前持久化有两条经过验证的运行路径：
+- **MySQL = canonical policy store / source of truth**
+- **Qdrant = rebuildable derived vector index**
 
-- 默认 Profile：H2 内存数据库，用于快速开发和测试；
-- `mysql` Profile：MySQL 8.0，用于本地 Docker 和 CI 集成验证。
+Policy Context 是不可信证据数据，不是系统指令。需要政策引用时，PolicyCitationValidator 拒绝缺失或未知 [Pn] 的回答。
 
-两条路径共享同一套 MyBatis-Plus Mapper 和 Flyway migration。数据库结构只有一个版本来源，不再同时维护 H2 `schema.sql` 和 MySQL DDL。
+## 4. Conversation Runtime
 
-这里暂时不额外引入 Repository Port / Adapter。原因是 H2 和 MySQL 都通过同一 JDBC / MyBatis 持久化契约访问，现有 `LoanStatusService -> Mapper` 没有因为切库而产生业务分支。只有未来同时接 MySQL、外部贷款 API 或其他异构数据源时，再增加 Repository 抽象才有实际收益。
+Conversation 使用 Flyway V4 的 conversation / conversation_message 表持久化。
 
-`V2__seed_demo_data.sql` 是本项目为了可复现演示保留的固定数据；`mysql` Profile 当前定位为本地 Demo / 集成测试配置，不应直接当成生产数据库配置。
-## 9. 写操作边界
+- transcript 只保存成功的 USER / ASSISTANT；
+- Tool messages 和 Policy Context 不写入 transcript；
+- 历史用于指代消解，不能成为当前金融事实来源；
+- 完整成功 transcript 留存，但模型可见窗口最多 20 条消息、12,000 字符，并保留完整 turn；
+- append 使用 version + last_message_sequence optimistic CAS，避免并发 turn 覆盖；
+- AgentTurnCompletionService 在一个事务中完成 transcript append 与 Agent SUCCESS audit。
 
-当前 Agent 没有写 Tool，因此安全边界是结构性的，而不只是 Prompt 约束。
+Hero 第二轮从 prior USER 内容恢复 LN-10002，而不是依赖 Assistant 输出。
 
-未来如果增加任何写操作，不能简单加入 `defaultTools`。至少需要单独设计：权限、显式确认、幂等、审计、失败恢复和按请求授权。在这些机制完成前，Agent 保持只读。
+## 5. Data and Migrations
 
-## 10. Agent 审计与 Observability
+Flyway 是数据库结构的唯一版本来源：
 
-Audit 与运行时 Observability 分层：Audit 负责请求和 Tool 顺序的可追溯，落在 Flyway V3
-的两张表；Micrometer/Actuator 和 Spring AI 内建 observations 负责指标与框架观测。
-审计 begin 在 ChatClient/模型调用前以独立事务提交，远程模型调用不包在数据库事务中，避免长事务；
-begin 失败时 fail-closed，不发起模型调用。
+| Migration | Responsibility |
+|---|---|
+| V1 | loan_contract、repayment_plan、payment_record |
+| V2 | LN-10001 / LN-10002 / LN-10003 synthetic validation fixture |
+| V3 | agent_audit_log、agent_tool_audit_log |
+| V4 | conversation、conversation_message 与 Agent/Conversation 关联 |
+| V5 | policy_document、policy_document_version、policy_chunk |
+| V6 | policy_retrieval_audit、policy_retrieval_hit |
 
-默认不保存 prompt、completion 或 Tool result 原文，只保存长度和 SHA-256 指纹；指纹用于完整性和关联，
-不代表匿名化。业务指标只使用 outcome、tool 等低基数 tag，不使用 requestId、loanNo 或内容。
-MDC 与请求上下文在 finally 清理；直接调用 Tool 没有 request context 时仍正常工作。
-`GET /api/agent/audits/{requestId}` 是无 RBAC 的本地 Demo/验收接口，生产环境不得裸露。
+H2 是默认快速开发/测试路径；MySQL 8 是本地集成、Policy RAG 和 Hero E2E 路径。两者共享 MyBatis-Plus 和 Flyway migration。
 
+V2 loan data、Policy RAG evaluation corpus 和 Hero policy 都是 synthetic validation fixture，不代表真实银行数据或完整法规。
 
-HTTP correlation 由 `AgentRequestCorrelationFilter` 负责。Filter 在 MVC JSON 反序列化之前生成服务端 UUID，写入 `X-Request-Id`、request attribute 和 MDC；因此 malformed JSON 也能关联日志。客户端传入的 `X-Request-Id` 不作为审计 id，服务端始终重新生成。malformed body 没有形成合法 Agent message，所以只保留 transport correlation，不伪造 Agent Audit；空白 message 已进入 Agent 语义，会持久化为 `FAILED`。
+## 6. Audit and Observability
 
-Agent message 不做隐式 `trim`，SHA-256 指纹对应真正传入 ChatClient 的字符串。Agent/Tool 的 `STARTED` 都先用 `REQUIRES_NEW` 短事务提交，再执行远程模型或 Tool；Tool 的 `STARTED` 写入失败时同样 fail-closed，不执行该 Tool。`agent_tool_audit_log` 使用 `(request_id, sequence_no)` 复合主键，因此持久层使用显式 MyBatis SQL，不暴露错误的单主键 `BaseMapper` 语义。
+Audit 与运行时 Observability 分层：
 
-自定义指标只使用有限白呕 tag：outcome、Tool 名和 audit operation，未知值统一折叠为 `unknown`。Spring AI ChatClient/ChatModel 的 prompt、completion、error logging 以及 Tool content observation 都显式关闭。当前 request context 基于 Servlet/ChatClient 同步调用链的 ThreadLocal；如果以后改成 reactive/async，需要替换为显式 context propagation，不能直接沿用。
+- Agent Audit：request、conversation、history/system-prompt fingerprint、SUCCESS/FAILED；
+- Tool Audit：Tool 顺序、名称、loan number、耗时和技术结果；
+- Policy Audit：decision、status、as-of date、query/context/config hash、embedding model、collection、hits 与 cited_in_answer；
+- Micrometer / Actuator：低基数运行指标和 health/info/prometheus。
+
+Audit STARTED 在远程调用前独立提交，模型调用不包在长数据库事务中。默认 loanops.audit.include-content=false，只保存长度与 SHA-256 指纹；SHA-256 不是匿名化。Spring AI prompt、completion、Tool content observations 默认关闭。
+
+AgentRequestCorrelationFilter 在 JSON 反序列化前生成服务端 UUID，并写入 X-Request-Id、request attribute 和 MDC。客户端传入的 request id 不受信任。
+
+当前 GET /api/agent/audits/{requestId} 没有 RBAC，只是本地验证接口，不是生产暴露方案。
+
+## 7. Runtime Failure Semantics
+
+- 当前消息最大 4,000 字符；
+- 模型可见历史最多 20 条消息和 12,000 字符；
+- HTTP connect/read timeout 默认 5s / 60s；
+- Spring AI max-attempts = 1，不进行自动重试；
+- REQUIRED 检索不可用时请求失败；
+- REQUIRED + NO_MATCH 不调用模型生成政策结论；
+- SUPPLEMENTAL 检索失败或无命中时，金融回答可继续，但必须带政策不可用/不足提示；
+- Provider 异常映射为稳定的 AgentProviderUnavailableException；
+- Citation Validation 失败和 Conversation CAS 冲突均阻止成功提交。
+
+这些边界降低失败放大和错误落盘风险，但不代表完整生产韧性；当前没有 provider fallback、circuit breaker、RBAC 或 rate limiting。
+
+## 8. Provider Boundary
+
+Agent 通过 Spring AI ChatClient 使用 DeepSeek，业务类不调用厂商 SDK。当前只有 DeepSeek 完成真实 Tool Calling 和 Hero E2E。
+
+Qwen/GLM 仅保留历史接入分析，未接入、未验证，不能列为 supported provider。任何 Provider 变化都不得修改 RepaymentCalculator、LoanDiagnosisService、LoanOpsTools 的业务语义或数据库事实。
+
+## 9. Deliberate Non-goals
+
+- Multi-Agent：没有自然角色分解；
+- MCP：现有 Tools 都是本地 Java 能力，没有跨进程/跨应用共享需求；
+- long-term Agent Memory：陈旧状态不能成为金融事实来源；
+- Hybrid Search / Reranker：E1 后固定 corpus 未显示排序瓶颈；
+- write Tools：权限、确认、幂等、恢复和人工批准尚未设计；
+- frontend、Kubernetes、cloud deployment：不属于当前可复现工程收口目标。

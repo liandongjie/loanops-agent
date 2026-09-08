@@ -2,8 +2,8 @@
 
 ## 1. Project goal
 
-LoanOps Agent is a small Java financial backend project for loan repayment
-and overdue diagnosis.
+LoanOps Agent is a focused, auditable, evaluable, read-only Java Agent for
+loan servicing diagnosis.
 
 The project demonstrates:
 
@@ -12,8 +12,10 @@ The project demonstrates:
 - deterministic financial domain logic
 - Spring AI
 - Tool Calling
+- persistent conversation state
+- Policy RAG with deterministic routing, citation validation and audit
 
-The project is intentionally small. Do not expand the product scope.
+The project is intentionally focused. Do not expand the product scope.
 
 Detailed requirements are defined in:
 
@@ -43,6 +45,19 @@ domain services and covered by tests.
 
 Do NOT add functionality outside docs/SCOPE.md.
 
+The current approved scope includes the independently gated Phase 6-8 work:
+
+- MySQL / Flyway persistence;
+- audit and observability;
+- persistent USER / ASSISTANT conversation state;
+- Agent evaluation;
+- Policy RAG using MySQL as the canonical policy store, BGE-M3 embeddings
+  and Qdrant as a rebuildable derived vector index;
+- deterministic Policy Router hardening;
+- runtime limits, finite external timeouts and failure semantics.
+
+Do not describe these implemented capabilities as optional future work.
+
 Especially do not introduce without an explicit new task:
 
 - frontend
@@ -53,13 +68,14 @@ Especially do not introduce without an explicit new task:
 - collection
 - penalty interest
 - early repayment
-- RAG
-- vector database
 - MCP
 - Multi-Agent
-- Redis
+- Redis or other long-term Agent memory
 - Kafka
 - Kubernetes
+- write-capable financial Tools
+- new retrieval techniques such as Hybrid Search, BM25, RRF, Reranker,
+  HyDE or GraphRAG without evaluation evidence and an explicitly approved phase
 
 If a task appears to require expanding scope, stop and report the reason.
 
@@ -76,7 +92,7 @@ Before modifying code:
 
 Do not perform unrelated refactors.
 
-Prefer small, auditable changes.
+Prefer narrow, auditable changes.
 
 Do not modify files outside the task scope unless necessary.
 If necessary, explain why before doing so.
@@ -126,7 +142,7 @@ Before completing a phase run the complete test suite.
 
 Current baseline command:
 
-mvn test
+mvn clean verify
 
 If tests fail, diagnose the root cause and fix it.
 If the specification and tests conflict, stop and report the conflict.

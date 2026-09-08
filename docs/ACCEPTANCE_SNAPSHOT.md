@@ -2,89 +2,114 @@
 
 ## Scope
 
-此快照记录当前主线代码进入公开展示前的验收标准。它不是对未来所有提交永久有效的保证；后续修改后应重新运行脚本和测试。
+此快照描述 Phase 9 收口时的当前验收面，不是对未来提交的永久保证。每次 fresh clone 或代码变更后都应重新执行相应 Gate；外部服务未运行时不得沿用历史 PASS。
 
-## Automated verification
+## Phase 9 Verification Record — 2026-09-08
 
-当前验收基线：
+- Phase 9 status：DONE；
+- Java：21.0.10；
+- mvn clean verify：BUILD SUCCESS，115 tests，0 failures，0 errors，5 skipped；
+- docker compose config：valid；
+- Hero E2E：ENV_BLOCKED。DEEPSEEK_API_KEY、Ollama 和 bge-m3 可用，但 Docker engine 未运行，
+  MySQL 127.0.0.1:3307 与 Qdrant 127.0.0.1:6333 均不可达。
 
-| Check | Result |
-|---|---|
-| Java 21 compilation | PASS |
-| Domain unit tests | PASS |
-| Persistence constraint tests | PASS |
-| REST integration tests | PASS |
-| 3 read-only Tool integration tests | PASS |
-| Agent Controller tests | PASS |
-| `mvn clean verify` | 以本阶段 H2/MySQL 实际执行结果为准 |
+5 个 skipped tests 是外部 Policy RAG / DeepSeek opt-in gates；它们不计为本轮 Hero PASS。
 
-## Deterministic business cases
+## Deterministic Local Gate
 
-固定业务日期：`2026-08-23`。
+要求 Java 21，并执行：
+
+~~~powershell
+mvn clean verify
+./scripts/verify-resume-mvp.ps1
+~~~
+
+mvn clean verify 覆盖当前默认 H2 自动测试，包括 Domain、Persistence、REST、只读 Tool、Conversation、Policy Runtime、Citation、Audit、Observability 和 Runtime Hardening。
+
+verify-resume-mvp.ps1 会再次运行完整 Maven verification、打包并启动临时 Spring Boot JAR，在固定业务日期 2026-08-23 下验证：
 
 | Case | Expected |
 |---|---|
-| `LN-10001` | due 8500, outstanding 8500, not overdue |
-| `LN-10002` | due 8500, paid 5000, outstanding 3500, overdue 3 days |
-| `LN-10003` | settled, total outstanding 0 |
+| LN-10001 | due 8500, outstanding 8500, not overdue |
+| LN-10002 | due 8500, paid 5000, outstanding 3500, overdue 3 days |
+| LN-10003 | settled, total outstanding 0 |
 
-## Live AI verification
+该脚本默认不调用 DeepSeek，也不启动或验证 Policy RAG。-WithAi 是早期三个 Tool Case 的 live DeepSeek smoke，不等于 Policy Hero E2E。
 
-DeepSeek 已完成真实 API E2E 验证，日志确认模型分别调用：
+## MySQL / Flyway Gate
 
-```text
-getCurrentRepayment
-getOverdueDiagnosis
-getSettlementStatus
-```
+~~~powershell
+$env:JAVA_HOME = "C:\path\to\jdk-21"
+./scripts/verify-mysql.ps1
+~~~
 
-同时验证：
+脚本启动 Docker MySQL 8，在 mysql Profile 下运行完整测试，启动实际 JAR，验证 LN-10002，并检查 Flyway V1-V3。当前数据库 schema 还包含：
 
-- 不存在贷款时不生成虚构贷款事实；
-- 请求写入/结清时 Agent 拒绝执行；
-- 写请求前后 `LN-10002` 的确定性状态保持一致。
+- V4 Conversation Runtime；
+- V5 canonical Policy document/version/chunk；
+- V6 Policy Retrieval/Hit Audit。
 
-Qwen / GLM 尚未完成当前项目的真实 E2E，因此不计入已支持 Provider。
+V4-V6 的专项约束由当前 Maven integration tests 覆盖；verify-mysql.ps1 的显式 history assertions 仍只检查 V1-V3，因此不能把脚本描述成 V4-V6 的专用验收器。
 
-## Re-run
+## Policy RAG Evaluation Evidence
 
-```powershell
-./scripts/verify-resume-mvp.ps1
-```
+固定 30-case Gold Dataset 与同一 synthetic corpus 的已提交结果：
 
-需要真实 DeepSeek：
+| Metric | E0 | E1 | E2 |
+|---|---:|---:|---:|
+| Router Accuracy | 0.8333 | 0.8333 | 1.0000 |
+| Policy-required Recall | 0.8077 | 0.8077 | 1.0000 |
+| ExactReferenceAccuracy | 0.7500 | 1.0000 | 1.0000 |
+| NoMatchAccuracy | 0.0000 | 1.0000 | 1.0000 |
+| FalseMatchCount | 3 | 0 | 0 |
 
-```powershell
-./scripts/verify-resume-mvp.ps1 -WithAi
-```
+E2 direct Retriever 的 Recall@1/3/5 和 MRR 均为 1.0000。数字只适用于该固定 corpus，不是 production accuracy。
 
-## Phase 5 resume-ready verification
+历史 E1 mixed-002 曾出现证据外“质押”扩展；E2 未复现，但没有 generation change，因此不记为已修复。
 
-2026-08-23 本地重新执行 scripts/verify-resume-mvp.ps1 -WithAi，结果为 PASS。验收同时覆盖固定业务日期、三笔确定性贷款案例、真实 DeepSeek Tool Calling、不存在贷款以及写操作拒绝。
-## MySQL / Flyway verification
+## Runtime Hardening Evidence
 
-此前基线已用 Docker MySQL 8.0 验证 V1/V2 持久化路径；本阶段 V3 的真实 MySQL 结果必须以本阶段脚本执行为准：
+- current message limit：4,000 characters；
+- model-visible history：20 messages / 12,000 characters；
+- finite HTTP connect/read timeout：5s / 60s；
+- Spring AI max-attempts：1，不进行自动重试；
+- Provider / required-policy / supplemental-policy / Citation / Conversation commit 失败语义由 deterministic tests 覆盖。
 
-- `mysql` Profile 下 `mvn clean verify`：以本阶段实际执行结果为准；
-- 空数据库应应用 V1 / V2 / V3，schema version 到 3；
-- `agent_audit_log` 与 `agent_tool_audit_log` 应在真实 MySQL 中存在；
-- 本机本轮若无法访问 Docker/MySQL，不得把上述期望写成已通过结果。
+真实 DeepSeek adversarial review 为 4/5 model-output semantic PASS。ADV-04 的缺失引用回答是 FAIL；PolicyCitationValidator 在成功提交前拒绝它。该结果说明 deterministic boundary 生效，不说明 prompt injection 已解决。
 
-本阶段仍保留 H2 作为默认快速测试数据库，MySQL 不改变 Java Domain、Tool 或 Agent 的业务规则。
+## Real Hero E2E Gate
 
-## Agent Audit / Observability
+Prerequisites：Java 21、MySQL、Qdrant v1.15.4、Ollama + bge-m3、DEEPSEEK_API_KEY。
 
-本阶段新增 Flyway `V3__create_agent_audit_tables.sql`，V1/V2 保持不变，并在 H2 与 MySQL 8.0
-创建 `agent_audit_log`、`agent_tool_audit_log`。请求先写入 `STARTED`，再更新为技术结果
-`SUCCESS` 或 `FAILED`；Tool 事件记录顺序、名称、贷款号、耗时和技术结果。
+~~~powershell
+docker compose up -d mysql qdrant
+ollama pull bge-m3
+$env:DEEPSEEK_API_KEY = "your-key"
+$env:POLICY_AGENT_REAL_E2E_TEST = "true"
+mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
+~~~
 
-默认 `loanops.audit.include-content=false`，只保存长度和 SHA-256 指纹，不保存完整 prompt/answer；
-SHA-256 不是匿名化。Spring AI prompt/completion/tool content observations 默认关闭，指标不使用
-`requestId`、`loanNo` 等高基数字段不进入 metric tag；tag 值只允许有限白名单，其他值归为 `unknown`。
-`POST /api/agent/chat` 由 Servlet Filter 在 JSON 反序列化前生成服务端 `X-Request-Id`；客户端传入值会被替换，malformed JSON 仍保留 transport correlation id。
-只有成功解析成 Agent message 的请求才创建 Agent Audit；空白 message 会写 `STARTED` 后转为 `FAILED / InvalidAgentMessageException`，且不调用模型。
-Audit 对传给 ChatClient 的原始 message 计算指纹，不执行隐式 `trim`。
-`GET /api/agent/audits/{requestId}` 返回该次 Agent 审计及按 sequence 排序的 Tool events。
+PolicyAgentRealE2EIntegrationTest 自行 ingest synthetic policy、重建隔离 collection，并验证：
 
-Actuator 只暴露 `health`、`info`、`prometheus`。审计查询是当前无 RBAC 的本地 Demo/验收接口，
-不代表生产安全边界。
+- Turn 1 调用 getOverdueDiagnosis(LN-10002)；
+- Turn 2 从 prior USER context 解析贷款；
+- SUPPLEMENTAL / MATCHED；
+- applicable article 成为 P1，回答包含有效 [P1]；
+- Policy Retrieval、hit、citation、Agent 与 Tool Audit 可关联；
+- transcript 恰为 USER、ASSISTANT、USER、ASSISTANT；
+- fixture 在测试后清理。
+
+模型措辞不固定。环境不完整时状态必须是 ENV_BLOCKED，而不是 PASS。
+
+## CI Boundary
+
+GitHub Actions 当前只执行：
+
+- H2 full Maven verification；
+- MySQL integration verification。
+
+Ollama 下载、BGE-M3、Qdrant Policy RAG E2、DeepSeek secret-dependent test 均保持 opt-in，不进入 CI，以避免外部 secret、大模型下载、随机性和额外运行成本。
+
+## Deployment Boundary
+
+应用以 Java 21 Spring Boot JAR 运行；MySQL/Qdrant 本地基础设施由 Docker Compose 提供。项目没有 application Dockerfile、Kubernetes、cloud deployment、RBAC、provider fallback 或真实银行生产部署声明。

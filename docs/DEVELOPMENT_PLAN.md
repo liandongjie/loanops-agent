@@ -1,5 +1,8 @@
 # LoanOps Agent — Development Plan
 
+> Phase 0-5 保留为 historical initial MVP record。Phase 6-8 是后续分别批准、
+> 实现并通过 Gate 的阶段；Phase 9 是当前工程收口阶段。
+
 ## 1. 开发总原则
 
 本项目采用**阶段式、门禁式、可回滚开发**。
@@ -311,7 +314,7 @@ feat: add loanops diagnostic agent
 6. 项目边界；
 7. 运行说明；
 8. DeepSeek Key 配置说明；
-9. 3 个演示问题；
+9. 3 个验证问题；
 10. 项目限制；
 11. `.gitignore`；
 12. 检查敏感信息。
@@ -341,7 +344,7 @@ test: harden loanops agent resume mvp
 也可按实际修改拆分：
 
 ```text
-docs: document loanops agent architecture and demo
+docs: document loanops agent architecture and validation
 ```
 
 ---
@@ -376,9 +379,9 @@ Java 21
 
 ---
 
-# 10. Stop Point B — Future Enhancements
+# 10. Historical Stop Point B — Original Future Enhancements
 
-仅在 Resume MVP 已经完成且不影响投递时考虑：
+以下是 Phase 5 结束时的历史候选列表，不代表当前状态：
 
 ### B1
 
@@ -448,9 +451,9 @@ Agent Evaluation
 
 ---
 
-# 12. 范围失控检查
+# 12. Historical Phase 0-5 范围失控检查
 
-任何开发阶段出现以下问题，应立即停止：
+在 Phase 0-5 当时，出现以下问题应立即停止：
 
 - 新增第四个核心业务 Case；
 - 新增前端；
@@ -464,3 +467,44 @@ Agent Evaluation
 项目的成功标准不是“功能多”，而是：
 
 > 小范围内业务正确、Java 扎实、Agent 边界清晰、测试可信、能够解释每个设计决定。
+
+---
+
+# 13. Phase 6 — Stateful Conversation Runtime
+
+| Item | Record |
+|---|---|
+| Goal | 在不把历史回答当作金融事实的前提下，支持持久化多轮对话与并发安全提交 |
+| Major artifact | Flyway V4、ConversationTurnStore、Conversation Snapshot、USER / ASSISTANT transcript、optimistic CAS |
+| Gate | H2 + MySQL persistence、restart continuity、fresh Tool call、rollback/conflict semantics、完整 Maven verification |
+| Status | DONE |
+
+# 14. Phase 7 — Policy RAG + Evaluation + Router Hardening
+
+| Item | Record |
+|---|---|
+| Goal | 引入版本化、可审计的政策证据路径，并用固定数据集定位 Router / Retriever / Generation 问题 |
+| Major artifact | Flyway V5/V6、MySQL canonical policy store、BGE-M3、Qdrant derived index、Policy Router/Retriever、Citation Validator、Policy Audit、30-case Gold Dataset、E0/E1/E2 |
+| Gate | 固定 corpus 评测、exact/temporal/no-match、真实 DeepSeek review、Hero E2E、H2/MySQL full verification |
+| Status | DONE；历史 generation bad case 保留，不宣称已消失 |
+
+# 15. Phase 8 — Runtime Hardening
+
+| Item | Record |
+|---|---|
+| Goal | 限制请求与历史规模，固定外部失败语义，并用 adversarial evidence 验证 deterministic safety boundary |
+| Major artifact | 4,000-char message limit、20-message/12,000-char model history、finite HTTP timeout、Spring AI max-attempts=1（不进行自动重试）、provider/policy/citation/commit failure handling |
+| Gate | focused deterministic tests、mvn clean verify、真实 DeepSeek adversarial review 4/5；ADV-04 由 Citation Validator 拒绝 |
+| Status | DONE |
+
+# 16. Phase 9 — Project Closure & Reproducible Delivery
+
+| Item | Record |
+|---|---|
+| Goal | reconciliation of documentation truth、reproducible evidence 与 claim discipline |
+| Major artifact | 当前 README/Architecture/Scope/Acceptance、Hero E2E runbook、environment example、metrics and limitations |
+| Gate | git diff --check、mvn clean verify、docker compose config；外部环境可用时运行 PolicyAgentRealE2EIntegrationTest，否则明确 ENV_BLOCKED |
+| Status | DONE；本轮 Hero re-run 因 Docker engine、MySQL 和 Qdrant 不可用记为 ENV_BLOCKED |
+
+Phase 9 不修改 production Java、Prompt、Router、Retriever、Tool、Conversation Runtime、
+Citation Validator、business rules、evaluation Gold data、pom.xml 或 migration。
