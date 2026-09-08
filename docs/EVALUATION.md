@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Phase 7.0 freezes a small pre-RAG behavior baseline for the current Stateful LoanOps Agent.
+Phase 7.0 freezes a focused pre-RAG behavior baseline for the current Stateful LoanOps Agent.
 The baseline exists so later changes such as Policy RAG can be compared against the same cases
 instead of being judged only by manual impressions.
 
@@ -37,7 +37,7 @@ cases just to increase the case count.
 
 ## Why the live baseline uses H2
 
-The live runner intentionally uses the existing `ai` profile with the normal H2/Flyway demo data.
+The live runner intentionally uses the existing `ai` profile with the normal H2/Flyway synthetic validation data.
 Phase 6 already accepted the Stateful Runtime against real MySQL 8, including restart persistence,
 transactions and CAS behavior. Phase 7.0 measures provider-dependent Agent behavior, so H2 makes the
 baseline faster and more repeatable while preserving the same deterministic seeded financial facts.
@@ -129,6 +129,10 @@ Each live run produces timestamped JSON and Markdown reports plus `*-latest` cop
 A case passes only when all required checks pass. The baseline does not claim statistical significance
 from one model run and does not use LLM-as-a-Judge.
 
+Historical unchanged-configuration execution also showed Tool-choice variance in the live provider
+path. Preserve that failure evidence: a later single 5/5 run is a regression artifact, not proof of a
+statistically stable Tool-selection rate.
+
 ## Interpretation
 
 The report is an Agent regression artifact, not financial truth. Financial truth remains in the
@@ -156,7 +160,7 @@ representative DeepSeek grounding review. Metric definitions and commands are do
 
 Phase 8 bounds the current message at 4,000 characters and the model-visible history at both 20
 messages and 12,000 characters, while preserving the full successful transcript. External calls have
-finite timeouts, Spring AI retry attempts are fixed at one, provider and required-policy failures have
+finite timeouts, Spring AI max-attempts is one so automatic retry is disabled, provider and required-policy failures have
 stable failure semantics, and supplemental-policy failures degrade without blocking financial facts.
 
 A real DeepSeek review produced 4/5 semantic passes across five representative adversarial samples.

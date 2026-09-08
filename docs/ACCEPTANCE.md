@@ -1,5 +1,8 @@
 # LoanOps Agent — Acceptance Criteria
 
+> Phase 1-5 / Stop Point A 保留为 historical initial MVP acceptance。
+> 当前验收还包括后续明确批准的 Phase 6-9，见本文后半部分。
+
 ## 1. 文档作用
 
 本文件定义 LoanOps Agent 每个阶段的验收门槛。
@@ -16,7 +19,7 @@
 
 1. 不允许通过删除、跳过或弱化测试来通过验收；
 2. 不允许为了通过测试修改 `DOMAIN.md` 中冻结业务规则；
-3. 不允许增加 `SCOPE.md` 明确禁止的业务功能；
+3. 不允许增加 SCOPE.md Current Non-goals 明确禁止的业务功能；
 4. 所有金额使用 `BigDecimal`；
 5. 领域时间使用可注入 `Clock`；
 6. 业务计算不能存在于 Prompt 或 Tool 中；
@@ -326,7 +329,7 @@ Agent 不得执行。
 
 ---
 
-# 8. Phase 5 — Resume MVP Hardening
+# 8. Phase 5 — Resume MVP Hardening（Historical）
 
 必须完成：
 
@@ -335,7 +338,7 @@ Agent 不得执行。
 - 项目架构说明；
 - 运行说明；
 - 环境变量说明；
-- 3 个 Demo；
+- 3 个 validation cases；
 - 项目边界说明；
 - AI 安全边界说明；
 - `.gitignore`；
@@ -351,7 +354,7 @@ Agent 不得执行。
 
 ---
 
-# 9. Stop Point A
+# 9. Stop Point A（Historical Initial MVP）
 
 以下条件全部通过即视为 Resume MVP 完成：
 
@@ -377,7 +380,94 @@ Agent 不得执行。
 
 ---
 
-# 10. 每阶段 Codex Completion Report
+# 10. Phase 6 — Stateful Conversation Runtime
+
+必须验证：
+
+- Flyway V4 创建 conversation / conversation_message；
+- transcript 只持久化成功的 USER / ASSISTANT；
+- 对话历史可解析先前 USER 中的 loan number；
+- 当前金融事实仍执行 fresh read-only Tool；
+- version + last_message_sequence optimistic CAS 阻止并发覆盖；
+- Provider、Tool 或 completion 失败不追加伪成功 turn；
+- H2 与 MySQL 路径均通过对应 Gate。
+
+状态：DONE。
+
+---
+
+# 11. Phase 7 — Policy RAG + Evaluation + Router Hardening
+
+必须验证：
+
+- MySQL 是 canonical policy document/version/chunk store；
+- Qdrant 是可从 MySQL 重建的 derived vector index；
+- Policy Router 输出 NOT_REQUIRED / SUPPLEMENTAL / REQUIRED；
+- 检索按业务日期过滤适用 policy version；
+- REQUIRED + NO_MATCH 不调用模型编造政策；
+- policy answer 的 [Pn] 由 deterministic PolicyCitationValidator 校验；
+- Flyway V6 记录 Policy Retrieval / Hit / Citation Audit；
+- fixed 30-case Gold Dataset 保持 corpus、配置和指标 scope 可追溯；
+- Hero E2E 覆盖 MySQL、BGE-M3、Qdrant、DeepSeek、Tool、Conversation、Citation 与 Audit。
+
+E2 的 1.0000 指标只属于固定 30-case corpus，不是 production accuracy。
+
+状态：DONE。历史 mixed-002 generation expansion 必须保留为历史 bad case，不能因后续一次未复现就声称修复。
+
+---
+
+# 12. Phase 8 — Runtime Hardening
+
+必须验证：
+
+- current message 上限 4,000 字符；
+- model-visible history 上限 20 messages / 12,000 characters，且不切断完整 turn；
+- HTTP 外部调用有有限 timeout，Spring AI max-attempts = 1（不进行自动重试）；
+- Provider 与 required-policy 失败有稳定失败语义；
+- supplemental-policy 失败不覆盖已取得的金融事实；
+- invalid/missing citation 在 successful transcript commit 前被拒绝；
+- adversarial review 的 ADV-04 保持 model-output FAIL，且 Validator rejection 有证据。
+
+状态：DONE。真实 DeepSeek adversarial review 为 4/5 model-output semantic PASS，不代表 prompt injection 已解决。
+
+---
+
+# 13. Phase 9 — Project Closure & Reproducible Delivery
+
+必须完成：
+
+- README、Scope、Architecture、Acceptance、Development Plan、Runbook 与当前实现一致；
+- fresh-clone Reviewer 能区分 Financial Facts 与 Policy Evidence 的事实来源；
+- Hero E2E 使用现有 PolicyAgentRealE2EIntegrationTest，不开发新 Hero 功能；
+- README 指标均带 fixed-corpus scope，并保留真实 bad case；
+- .env.example 只含 placeholder / localhost defaults，不含 secret；
+- CI 范围准确描述为 H2 full verification + MySQL integration verification；
+- 外部 AI/RAG Gate 保持 opt-in。
+
+最终 Gate：
+
+~~~powershell
+git diff --check
+mvn clean verify
+docker compose config
+~~~
+
+如果 MySQL、Qdrant、Ollama/bge-m3、DEEPSEEK_API_KEY 均可用，再执行：
+
+~~~powershell
+$env:POLICY_AGENT_REAL_E2E_TEST = "true"
+mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
+~~~
+
+环境缺失时必须报告 ENV_BLOCKED，不得伪造 PASS。Phase 9 不修改 production Java、pom.xml、
+migration、测试行为或 evaluation Gold data。
+
+状态：DONE。本轮 deterministic Maven Gate 与 Compose config PASS；Hero re-run 因 Docker
+engine、MySQL 和 Qdrant 不可用记为 ENV_BLOCKED。完成后 STOP。
+
+---
+
+# 14. 每阶段 Codex Completion Report
 
 Codex 每一阶段完成后必须输出：
 

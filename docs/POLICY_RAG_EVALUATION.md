@@ -68,12 +68,16 @@ but generation constraints were not changed and that historical finding is not c
 
 ## Hard gates
 
-- temporal version correctness is 100%;
+- on the fixed 30-case corpus, TemporalVersionAccuracy is 1.0000;
 - required no-match requests abstain without calling the model;
 - invalid citations are rejected before transcript completion;
 - financial facts come from read-only Tools;
 - conversation persistence contains only USER/ASSISTANT messages;
-- the existing five-case live Agent baseline remains 5/5.
+- rerun the existing five-case live Agent baseline and preserve any failure evidence.
+
+The live Agent baseline is a bounded stochastic provider regression gate, not a stable-rate claim.
+Historical unchanged-configuration runs showed Tool-choice variance, so one 5/5 run must not be
+reported as statistically stable behavior.
 
 When E0 fails, classify failures by responsible layer before changing code. Apply at most one main
 optimization, rerun the identical corpus and dataset, and remove the change if E1 does not improve
