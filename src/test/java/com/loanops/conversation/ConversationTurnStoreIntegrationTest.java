@@ -31,7 +31,10 @@ import java.util.concurrent.TimeUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-@SpringBootTest(properties = "loanops.conversation.history-message-limit=3")
+@SpringBootTest(properties = {
+        "loanops.conversation.history-message-limit=4",
+        "loanops.conversation.history-character-limit=30"
+})
 class ConversationTurnStoreIntegrationTest {
 
     private static final LocalDateTime NOW = LocalDateTime.of(2026, 9, 5, 10, 0);
@@ -108,7 +111,7 @@ class ConversationTurnStoreIntegrationTest {
     }
 
     @Test
-    void boundedHistoryIsChronologicalAndKeepsCompleteTurns() {
+    void characterBudgetKeepsNewestCompleteTurnWithoutDeletingTranscript() {
         ConversationSnapshot created = store.create();
         appendTurn(created.conversationId(), 0, 0, "question-1", "answer-1");
         appendTurn(created.conversationId(), 1, 2, "question-2", "answer-2");
@@ -124,6 +127,24 @@ class ConversationTurnStoreIntegrationTest {
                 .containsExactly("USER", "ASSISTANT");
         assertThat(resolved.history()).extracting(ConversationHistoryMessage::content)
                 .containsExactly("question-3", "answer-3");
+        assertThat(messages(created.conversationId())).extracting(ConversationMessageEntity::getContent)
+                .containsExactly("question-1", "answer-1", "question-2", "answer-2", "question-3", "answer-3");
+    }
+
+    @Test
+    void messageCountBudgetKeepsTwoNewestCompleteTurns() {
+        ConversationSnapshot created = store.create();
+        appendTurn(created.conversationId(), 0, 0, "q1", "a1");
+        appendTurn(created.conversationId(), 1, 2, "q2", "a2");
+        appendTurn(created.conversationId(), 2, 4, "q3", "a3");
+
+        ConversationSnapshot resolved = store.resolve(created.conversationId());
+
+        assertThat(resolved.history()).extracting(ConversationHistoryMessage::sequenceNo)
+                .containsExactly(3, 4, 5, 6);
+        assertThat(resolved.history()).extracting(ConversationHistoryMessage::content)
+                .containsExactly("q2", "a2", "q3", "a3");
+        assertThat(messages(created.conversationId())).hasSize(6);
     }
 
     @Test

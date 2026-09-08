@@ -151,3 +151,19 @@ visible when retrieval context is introduced.
 Phase 7.4 adds a separate fixed Gold corpus, real BGE-M3/Qdrant evaluation, E0/E1 reports and a
 representative DeepSeek grounding review. Metric definitions and commands are documented in
 `docs/POLICY_RAG_EVALUATION.md`; this does not replace the five-case Agent baseline above.
+
+## Phase 8 Runtime Hardening / Adversarial Review
+
+Phase 8 bounds the current message at 4,000 characters and the model-visible history at both 20
+messages and 12,000 characters, while preserving the full successful transcript. External calls have
+finite timeouts, Spring AI retry attempts are fixed at one, provider and required-policy failures have
+stable failure semantics, and supplemental-policy failures degrade without blocking financial facts.
+
+A real DeepSeek review produced 4/5 semantic passes across five representative adversarial samples.
+In ADV-04, malicious policy evidence suppressed the required `[P1]` citation: the model returned a
+policy conclusion without a citation. The deterministic `PolicyCitationValidator` rejects this response,
+so the observed model-layer failure did not bypass the runtime citation-validation boundary.
+
+This supports defense in depth: prompt instructions are a soft control and citation validation is a
+hard, fail-closed control. It does not establish that prompt injection is solved. DeepSeek behavior
+remains stochastic, and these five samples are a safety sanity check rather than a benchmark or proof.

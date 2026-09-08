@@ -24,19 +24,25 @@ public class ConversationTurnStore {
     private final ConversationMessageMapper messageMapper;
     private final AuditTimeProvider timeProvider;
     private final int historyMessageLimit;
+    private final int historyCharacterLimit;
 
     public ConversationTurnStore(
             ConversationMapper conversationMapper,
             ConversationMessageMapper messageMapper,
             AuditTimeProvider timeProvider,
-            @Value("${loanops.conversation.history-message-limit:20}") int historyMessageLimit) {
+            @Value("${loanops.conversation.history-message-limit:20}") int historyMessageLimit,
+            @Value("${loanops.conversation.history-character-limit:12000}") int historyCharacterLimit) {
         if (historyMessageLimit < 2) {
             throw new IllegalArgumentException("Conversation history message limit must be at least 2");
+        }
+        if (historyCharacterLimit < 1) {
+            throw new IllegalArgumentException("Conversation history character limit must be positive");
         }
         this.conversationMapper = conversationMapper;
         this.messageMapper = messageMapper;
         this.timeProvider = timeProvider;
         this.historyMessageLimit = historyMessageLimit - historyMessageLimit % 2;
+        this.historyCharacterLimit = historyCharacterLimit;
     }
 
     @Transactional
@@ -64,7 +70,7 @@ public class ConversationTurnStore {
                 .map(message -> new ConversationHistoryMessage(
                         message.getSequenceNo(), message.getRole(), message.getContent()))
                 .toList();
-        return snapshot(conversation, history);
+        return snapshot(conversation, retainNewestCompleteTurns(history));
     }
 
     @Transactional
@@ -131,5 +137,19 @@ public class ConversationTurnStore {
                 conversation.getLastMessageSequence(),
                 history,
                 ConversationHistoryFingerprint.sha256(history));
+    }
+
+    private List<ConversationHistoryMessage> retainNewestCompleteTurns(List<ConversationHistoryMessage> history) {
+        int characters = 0;
+        int fromIndex = history.size();
+        for (int index = history.size() - 2; index >= 0; index -= 2) {
+            ConversationHistoryMessage user = history.get(index);
+            ConversationHistoryMessage assistant = history.get(index + 1);
+            int turnCharacters = user.content().length() + assistant.content().length();
+            if (characters + turnCharacters > historyCharacterLimit) break;
+            characters += turnCharacters;
+            fromIndex = index;
+        }
+        return history.subList(fromIndex, history.size());
     }
 }
