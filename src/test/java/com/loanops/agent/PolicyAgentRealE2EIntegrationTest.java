@@ -1,5 +1,6 @@
 package com.loanops.agent;
 
+import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.dto.AgentAuditResponse;
 import com.loanops.dto.AgentChatResult;
 import com.loanops.policy.PolicyIngestionService;
@@ -45,6 +46,7 @@ class PolicyAgentRealE2EIntegrationTest {
     @Autowired private PolicyVectorIndex vectorIndex;
     @Autowired private LoanOpsAgentService agentService;
     @Autowired private com.loanops.audit.AgentAuditService agentAuditService;
+    @Autowired private LoanOpsAgentProperties agentProperties;
     @Autowired private JdbcTemplate jdbc;
 
     private final List<String> requestIds = new ArrayList<>();
@@ -52,7 +54,7 @@ class PolicyAgentRealE2EIntegrationTest {
     private String documentId;
 
     @Test
-    void realMysqlBgeQdrantDeepSeekToolsConversationAndAuditGate() {
+    void realMysqlBgeQdrantChatToolsConversationAndAuditGate() {
         cleanupFixture();
         vectorIndex.replaceAll(List.of());
         IngestionResult ingestion = ingestionService.ingest(
@@ -78,6 +80,10 @@ class PolicyAgentRealE2EIntegrationTest {
         AgentAuditResponse secondAudit = agentAuditService.get(secondRequestId);
         assertThat(firstAudit.status()).isEqualTo("SUCCESS");
         assertThat(secondAudit.status()).isEqualTo("SUCCESS");
+        assertThat(firstAudit.provider()).isEqualTo(agentProperties.provider());
+        assertThat(firstAudit.model()).isEqualTo(agentProperties.model());
+        assertThat(secondAudit.provider()).isEqualTo(agentProperties.provider());
+        assertThat(secondAudit.model()).isEqualTo(agentProperties.model());
         assertThat(firstAudit.tools()).anySatisfy(tool -> {
             assertThat(tool.toolName()).isEqualTo("getOverdueDiagnosis");
             assertThat(tool.loanNo()).isEqualTo("LN-10002");
@@ -133,6 +139,8 @@ class PolicyAgentRealE2EIntegrationTest {
                 hit.get("citation_ref"), hit.get("cited_in_answer"));
         System.out.printf("POLICY_AGENT_E2E_AUDIT first=%s second=%s policy=%s transcriptRoles=USER,ASSISTANT,USER,ASSISTANT%n",
                 firstAudit.status(), secondAudit.status(), retrieval.get("status"));
+        System.out.printf("POLICY_AGENT_E2E_IDENTITY provider=%s model=%s embedding=%s%n",
+                secondAudit.provider(), secondAudit.model(), retrieval.get("embedding_model"));
         System.out.println("POLICY_AGENT_E2E_ANSWER=" + second.answer().replaceAll("\\s+", " "));
     }
 

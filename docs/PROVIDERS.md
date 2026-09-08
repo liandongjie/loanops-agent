@@ -2,14 +2,14 @@
 
 ## 1. 当前结论
 
-当前版本只把 **DeepSeek** 标记为“已接入且通过真实 Tool Calling E2E 验证”的 Provider。
+当前版本把 **DeepSeek** 和 **Ollama / qwen3:4b** 标记为已通过真实 Tool Calling E2E 验证的 Chat Provider。
 
-Qwen 和 GLM 只定义接入边界，不在没有真实验收的情况下写成“已支持”。
+GLM 只定义接入边界，不在没有真实验收的情况下写成“已支持”。
 
 | Provider | 接入方式 | 当前状态 | 需要的验收 |
 |---|---|---|---|
 | DeepSeek | Spring AI DeepSeek ChatModel | 已接入 | 已完成 3 个固定 Agent Case |
-| Qwen | Ollama ChatModel（A2 计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
+| Ollama | Spring AI Ollama ChatModel（`qwen3:4b`） | 已完成 Tool Calling 与 Policy Hero 验证 | 已完成 5-case baseline、unknown-loan 与 Policy Hero |
 | GLM | OpenAI-compatible Chat API（计划） | 未接入 | 3 Tool + 3 Agent Case + 异常/只读 Case |
 
 ## 2. Provider 不应该影响什么
@@ -72,9 +72,9 @@ LN-10002 -> getOverdueDiagnosis
 LN-10003 -> getSettlementStatus
 ```
 
-## 5. Qwen 扩展路径
+## 5. Ollama / qwen3:4b
 
-当前 A2 计划路径为：
+当前 A2 运行身份为：
 
 ```text
 Provider = ollama
@@ -82,7 +82,7 @@ Adapter  = ollama
 Model    = qwen3:4b
 ```
 
-该路径将在后续 A2 实现并进行真实 Tool Calling 验收；A1 不把 Qwen 标记为已接入或已验证。
+该路径已通过两次相同配置的 5-case baseline，并完成 unknown-loan 与 Policy Hero 验证。实际 Agent Audit 为 `provider=ollama`、`model=qwen3:4b`；Policy retrieval audit 的 embedding model 仍为 `bge-m3`。两次 baseline 只作为有限的 variance sanity check，不代表统计稳定性结论。
 
 Alibaba Model Studio / OpenAI-compatible Qwen 仅保留为 future alternative，不是当前 A2 实施路径。若未来单独批准该路径，再评估以下配置：
 
@@ -91,8 +91,6 @@ QWEN_API_KEY / DASHSCOPE_API_KEY
 QWEN_BASE_URL
 QWEN_MODEL
 ```
-
-接入完成前，不把 Qwen 写入“Supported Providers”。
 
 官方参考：
 

@@ -22,7 +22,7 @@ public class LoanOpsTools {
 
     @Tool(
             name = "getCurrentRepayment",
-            description = "Read the deterministic current repayment facts for a loan. Use this for questions about the current installment, principal, interest, amount due, amount paid, remaining amount, due date, or whether the current installment is overdue.")
+            description = "Read the deterministic current repayment facts for a loan. Use this for questions about the current installment, principal, interest, amount due, amount paid, remaining amount, due date, or whether the current installment is overdue. This includes follow-up questions after an overdue diagnosis about how much is currently owed for the installment.")
     public CurrentRepaymentFacts getCurrentRepayment(
             @ToolParam(description = "Loan number, for example LN-10001") String loanNo) {
         return toolAuditService.execute(
@@ -40,7 +40,7 @@ public class LoanOpsTools {
 
     @Tool(
             name = "getSettlementStatus",
-            description = "Read whether a loan is fully settled and its total outstanding amount. This tool is read-only and never changes loan status.")
+            description = "Read whether a whole loan is fully settled and its total outstanding balance. Use this only for whole-loan settlement or total outstanding questions, not for the current installment amount after an overdue diagnosis. This tool is read-only and never changes loan status.")
     public SettlementStatusFacts getSettlementStatus(
             @ToolParam(description = "Loan number, for example LN-10003") String loanNo) {
         return toolAuditService.execute(

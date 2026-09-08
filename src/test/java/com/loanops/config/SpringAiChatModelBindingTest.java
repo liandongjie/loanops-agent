@@ -3,6 +3,8 @@ package com.loanops.config;
 import org.junit.jupiter.api.Test;
 import org.springframework.ai.model.deepseek.autoconfigure.DeepSeekChatProperties;
 import org.springframework.ai.model.ollama.autoconfigure.OllamaChatProperties;
+import org.springframework.ai.model.ollama.autoconfigure.OllamaConnectionProperties;
+import org.springframework.ai.model.ollama.autoconfigure.OllamaEmbeddingProperties;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.WebApplicationType;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -29,6 +31,18 @@ class SpringAiChatModelBindingTest {
         }
     }
 
+    @Test
+    void keepsOllamaChatAndEmbeddingConfigurationIndependent() {
+        try (ConfigurableApplicationContext context = runWithPolicy()) {
+            assertThat(context.getBean(OllamaChatProperties.class).getOptions().getModel())
+                    .isEqualTo("qwen3:4b");
+            assertThat(context.getBean(OllamaEmbeddingProperties.class).getModel())
+                    .isEqualTo("bge-m3");
+            assertThat(context.getBean(OllamaConnectionProperties.class).getBaseUrl())
+                    .isEqualTo("http://127.0.0.1:11435");
+        }
+    }
+
     private ConfigurableApplicationContext run(String provider, String adapter, String model) {
         SpringApplication application = new SpringApplication(SpringAiPropertiesConfiguration.class);
         application.setWebApplicationType(WebApplicationType.NONE);
@@ -43,6 +57,21 @@ class SpringAiChatModelBindingTest {
                 "--LOANOPS_CHAT_MODEL=" + model);
     }
 
+    private ConfigurableApplicationContext runWithPolicy() {
+        SpringApplication application = new SpringApplication(OllamaPropertiesConfiguration.class);
+        application.setWebApplicationType(WebApplicationType.NONE);
+        application.setLogStartupInfo(false);
+        return application.run(
+                "--spring.config.location=classpath:/application.yml,classpath:/application-ai.yml,classpath:/application-policy.yml",
+                "--spring.profiles.active=ai,policy",
+                "--spring.main.banner-mode=off",
+                "--LOANOPS_CHAT_PROVIDER=ollama",
+                "--LOANOPS_CHAT_ADAPTER=ollama",
+                "--LOANOPS_CHAT_MODEL=qwen3:4b",
+                "--OLLAMA_BASE_URL=http://127.0.0.1:11435",
+                "--OLLAMA_EMBEDDING_MODEL=bge-m3");
+    }
+
     @Configuration(proxyBeanMethods = false)
     @EnableConfigurationProperties({
             LoanOpsAgentProperties.class,
@@ -50,5 +79,15 @@ class SpringAiChatModelBindingTest {
             OllamaChatProperties.class
     })
     static class SpringAiPropertiesConfiguration {
+    }
+
+    @Configuration(proxyBeanMethods = false)
+    @EnableConfigurationProperties({
+            LoanOpsAgentProperties.class,
+            OllamaChatProperties.class,
+            OllamaConnectionProperties.class,
+            OllamaEmbeddingProperties.class
+    })
+    static class OllamaPropertiesConfiguration {
     }
 }
