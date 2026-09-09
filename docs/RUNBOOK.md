@@ -227,7 +227,7 @@ E0/E1/E2 指标仅属于固定 synthetic corpus。历史 mixed-002 generation ex
 只验证确定性 REST：
 
 ~~~powershell
-$env:SERVER_PORT = "18080"
+$env:SERVER_PORT = "8080"
 mvn spring-boot:run
 ~~~
 
@@ -236,11 +236,26 @@ mvn spring-boot:run
 ~~~powershell
 $env:SPRING_PROFILES_ACTIVE = "mysql,policy,ai"
 $env:DEEPSEEK_API_KEY = "your-key"
-$env:SERVER_PORT = "18080"
+$env:SERVER_PORT = "8080"
 mvn spring-boot:run
 ~~~
 
 空 fresh database 只有 schema 和 synthetic loan fixture；Policy RAG 需要显式 ingest policy 并 rebuild index。Hero test 会自行完成隔离的 synthetic policy 准备，不需要新增 seeding subsystem。
+
+### 7.1 Terminal Chat
+
+Terminal Chat 不会自动启动后端。先按上文启动启用了 `ai` profile 的 Agent，再在另一个 PowerShell 7 终端运行：
+
+~~~powershell
+./scripts/chat.ps1
+./scripts/chat.ps1 -BaseUrl "http://127.0.0.1:8080"
+~~~
+
+- `/new`：清空客户端的 current conversation ID，不删除服务端 Conversation；
+- `/id`：显示当前 conversation ID；
+- `/exit`：退出。
+
+Terminal 只调用现有 `POST /api/agent/chat`，本地不保存 USER/ASSISTANT 历史。Provider identity 仍由运行中服务的 `LOANOPS_CHAT_PROVIDER`、`LOANOPS_CHAT_ADAPTER`、`LOANOPS_CHAT_MODEL` 决定；Terminal 不读取 Provider secret。当前 API 会等待并返回完整 answer，不提供 token streaming。
 
 ## 8. Proxy Note
 
