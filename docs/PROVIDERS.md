@@ -6,9 +6,9 @@
 
 | Provider | 接入方式 | 当前状态 | 需要的验收 |
 |---|---|---|---|
-| DeepSeek | Spring AI DeepSeek ChatModel | 已接入 | 已完成 3 个固定 Agent Case |
-| Ollama | Spring AI Ollama ChatModel（`qwen3:4b`） | 已完成 Tool Calling 与 Policy Hero 验证 | 已完成 5-case baseline、unknown-loan 与 Policy Hero |
-| GLM | Spring AI ZhiPuAI ChatModel（`glm-5.2`） | 已完成 Tool Calling 与 Policy Hero 验证 | 已完成 5-case baseline、unknown-loan 与 Policy Hero |
+| DeepSeek | Spring AI DeepSeek ChatModel（`deepseek-chat`） | FULLY VERIFIED | 统一 6-case baseline + Policy Hero |
+| Ollama | Spring AI Ollama ChatModel（`qwen3:4b`） | FULLY VERIFIED | 统一 6-case baseline + Policy Hero |
+| GLM | Spring AI ZhiPuAI ChatModel（`glm-5.2`） | FULLY VERIFIED | 统一 6-case baseline + Policy Hero |
 
 ## 2. Provider 不应该影响什么
 
@@ -80,7 +80,7 @@ Adapter  = ollama
 Model    = qwen3:4b
 ```
 
-该路径已通过两次相同配置的 5-case baseline，并完成 unknown-loan 与 Policy Hero 验证。实际 Agent Audit 为 `provider=ollama`、`model=qwen3:4b`；Policy retrieval audit 的 embedding model 仍为 `bge-m3`。两次 baseline 只作为有限的 variance sanity check，不代表统计稳定性结论。
+该路径已完成 A4 统一 6-case baseline 与 Policy Hero。实际 Agent Audit 为 `provider=ollama`、`model=qwen3:4b`；Policy retrieval audit 的 embedding model 仍为 `bge-m3`。历史 unchanged-config 运行曾观察到 Tool-selection variance；本轮单次 6/6 只是一份回归证据，不代表统计稳定性结论。
 
 Alibaba Model Studio / OpenAI-compatible Qwen 仅保留为 future alternative，不是当前 A2 实施路径。若未来单独批准该路径，再评估以下配置：
 
@@ -105,7 +105,7 @@ Adapter  = zhipuai
 Model    = glm-5.2
 ```
 
-项目使用 Spring AI 1.1.1 原生 `ZhiPuAiChatModel` 和智谱标准开放平台 endpoint；`GLM_API_KEY` 是唯一新增的 Provider Secret，model 继续由 `LOANOPS_CHAT_MODEL` 控制。该路径已完成真实 5-case baseline、unknown-loan 与 Policy Hero，实际 Agent Audit 为 `provider=glm`、`model=glm-5.2`，Policy retrieval audit 的 embedding model 仍为 `bge-m3`。
+项目使用 Spring AI 1.1.1 原生 `ZhiPuAiChatModel` 和智谱标准开放平台 endpoint；`GLM_API_KEY` 是唯一新增的 Provider Secret，model 继续由 `LOANOPS_CHAT_MODEL` 控制。该路径已完成 A4 统一 6-case baseline 与 Policy Hero，实际 Agent Audit 为 `provider=glm`、`model=glm-5.2`，Policy retrieval audit 的 embedding model 仍为 `bge-m3`。
 
 不同时保留 GLM OpenAI-compatible adapter；`glm / openai` 会在配置边界 fail-fast。
 
@@ -114,7 +114,19 @@ Model    = glm-5.2
 - https://docs.bigmodel.cn/api-reference/模型-api/对话补全
 - https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2
 
-## 7. 验收原则
+## 7. A4 Final Regression Matrix
+
+以下是 2026-09-09 在同一 A4 working tree（基于 `98ae325`）上形成的当前本地回归证据。Baseline 使用同一六用例 manifest、固定业务日期和时区；Policy Hero 使用同一个 `PolicyAgentRealE2EIntegrationTest`。这些是有限样本的回归结果，不是性能、质量排名或统计稳定率。
+
+| Provider | Adapter | Model | Baseline | Unknown | Stateful | Policy Hero | Audit identity | Known variance |
+|---|---|---|---|---|---|---|---|---|
+| deepseek | deepseek | deepseek-chat | 6/6 PASS | PASS | PASS | PASS | 一致 | 本轮未观察到；单次运行不证明稳定 |
+| ollama | ollama | qwen3:4b | 6/6 PASS | PASS | PASS | PASS | 一致 | 历史曾观察 Tool-selection variance；本轮首次 6/6 |
+| glm | zhipuai | glm-5.2 | 6/6 PASS | PASS | PASS | PASS | 一致 | 本轮未观察到；单次运行不证明稳定 |
+
+三组 Hero 的 embedding audit 均为 `ollama / bge-m3`，没有被 Chat model 覆盖。首次 DeepSeek Hero 尝试在模型调用前因 Docker engine 未运行而 ENV_BLOCKED；恢复既有 MySQL/Qdrant 后三组 Hero 均 PASS。
+
+## 8. 验收原则
 
 任何新 Provider 必须复用同一套业务事实，并至少通过：
 

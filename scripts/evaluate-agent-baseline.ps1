@@ -1,6 +1,9 @@
 param(
     [int]$Port = 18091,
     [string]$ManifestPath = "evaluation/agent-baseline-cases.json",
+    [ValidateSet("deepseek", "ollama", "glm")]
+    [string]$Provider = "deepseek",
+    [string]$Model = "",
     [string]$ProxyHost = "",
     [int]$ProxyPort = 0,
     [switch]$ValidateOnly,
@@ -11,8 +14,23 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$AllowedCaseTypes = @("single-turn", "read-only-guard", "stateful-two-turn")
+$AllowedCaseTypes = @("single-turn", "read-only-guard", "stateful-two-turn", "not-found")
 $AllowedReadOnlyTools = @("getCurrentRepayment", "getOverdueDiagnosis", "getSettlementStatus")
+
+function Resolve-ProviderConfig([string]$ProviderName, [string]$ModelOverride) {
+    $config = switch ($ProviderName) {
+        "deepseek" { [pscustomobject]@{ adapter = "deepseek"; defaultModel = "deepseek-chat" } }
+        "ollama" { [pscustomobject]@{ adapter = "ollama"; defaultModel = "qwen3:4b" } }
+        "glm" { [pscustomobject]@{ adapter = "zhipuai"; defaultModel = "glm-5.2" } }
+        default { throw "Unsupported provider: $ProviderName" }
+    }
+    $resolvedModel = if ([string]::IsNullOrWhiteSpace($ModelOverride)) { $config.defaultModel } else { $ModelOverride.Trim() }
+    return [pscustomobject]@{
+        provider = $ProviderName
+        adapter = $config.adapter
+        model = $resolvedModel
+    }
+}
 
 function Resolve-RepoPath([string]$Path) {
     if ([System.IO.Path]::IsPathRooted($Path)) {
@@ -76,6 +94,17 @@ function Validate-Manifest($Manifest) {
                 }
                 if ($null -eq $case.expected -or [string]::IsNullOrWhiteSpace([string]$case.expected.turn1ToolName) -or [string]::IsNullOrWhiteSpace([string]$case.expected.turn2ToolName) -or [string]::IsNullOrWhiteSpace([string]$case.expected.loanNo)) {
                     throw "Case $($case.id) requires expected turn Tool names and loanNo"
+                }
+            }
+            "not-found" {
+                if ([string]::IsNullOrWhiteSpace([string]$case.message)) { throw "Case $($case.id) requires message" }
+                if ($null -eq $case.expected -or
+                        [string]::IsNullOrWhiteSpace([string]$case.expected.toolName) -or
+                        [string]::IsNullOrWhiteSpace([string]$case.expected.loanNo) -or
+                        [string]::IsNullOrWhiteSpace([string]$case.expected.errorType) -or
+                        [string]::IsNullOrWhiteSpace([string]$case.expected.answerRegex) -or
+                        [string]::IsNullOrWhiteSpace([string]$case.expected.forbiddenAnswerRegex)) {
+                    throw "Case $($case.id) requires expected toolName, loanNo, errorType, answerRegex and forbiddenAnswerRegex"
                 }
             }
         }
@@ -154,13 +183,20 @@ function Test-Regex([string]$Value, [string]$Pattern) {
     return $Value -match $Pattern
 }
 
-function Find-Tool($Audit, [string]$ToolName, [string]$LoanNo) {
+function Find-Tool($Audit, [string]$ToolName, [string]$LoanNo, [string]$Status = "SUCCESS", [string]$ErrorType = "") {
     $matches = @($Audit.tools | Where-Object {
         [string]$_.toolName -eq $ToolName -and
         [string]$_.loanNo -eq $LoanNo -and
-        [string]$_.status -eq "SUCCESS"
+        [string]$_.status -eq $Status -and
+        ([string]::IsNullOrWhiteSpace($ErrorType) -or [string]$_.errorType -eq $ErrorType)
     })
     Write-Output -NoEnumerate $matches
+}
+
+function Add-IdentityChecks($Checks, $Audit, $Identity, [string]$Prefix = "") {
+    $namePrefix = if ([string]::IsNullOrWhiteSpace($Prefix)) { "" } else { "$Prefix-" }
+    Add-Check $Checks "$($namePrefix)audit-provider" ([string]$Audit.provider -eq [string]$Identity.provider) "requested=$($Identity.provider) actual=$($Audit.provider)"
+    Add-Check $Checks "$($namePrefix)audit-model" ([string]$Audit.model -eq [string]$Identity.model) "requested=$($Identity.model) actual=$($Audit.model)"
 }
 
 function Finish-Case([string]$Id, [string]$Category, $Checks, [hashtable]$Evidence) {
@@ -178,12 +214,13 @@ function Finish-Case([string]$Id, [string]$Category, $Checks, [hashtable]$Eviden
     return [pscustomobject]$result
 }
 
-function Run-SingleTurnCase($Case) {
+function Run-SingleTurnCase($Case, $Identity) {
     $checks = New-Checks
     try {
         $response = Invoke-Agent ([string]$Case.message)
         $audit = Get-AgentAudit ([string]$response.requestId)
         Add-Check $checks "audit-success" ([string]$audit.status -eq "SUCCESS") "audit status=$($audit.status)"
+        Add-IdentityChecks $checks $audit $Identity
         Add-Check $checks "conversation-correlation" ([string]$audit.conversationId -eq [string]$response.conversationId) "response=$($response.conversationId) audit=$($audit.conversationId)"
         $tools = Find-Tool $audit ([string]$Case.expected.toolName) ([string]$Case.expected.loanNo)
         Add-Check $checks "expected-tool" ($tools.Count -ge 1) "expected=$($Case.expected.toolName)/$($Case.expected.loanNo)"
@@ -206,7 +243,7 @@ function Run-SingleTurnCase($Case) {
     }
 }
 
-function Run-ReadOnlyGuardCase($Case) {
+function Run-ReadOnlyGuardCase($Case, $Identity) {
     $checks = New-Checks
     try {
         $before = Get-LoanState ([string]$Case.loanNo)
@@ -217,6 +254,7 @@ function Run-ReadOnlyGuardCase($Case) {
         $afterJson = $after | ConvertTo-Json -Depth 20 -Compress
 
         Add-Check $checks "audit-success" ([string]$audit.status -eq "SUCCESS") "audit status=$($audit.status)"
+        Add-IdentityChecks $checks $audit $Identity
         Add-Check $checks "refusal-language" (Test-Regex ([string]$response.answer) ([string]$Case.expected.answerRegex)) "pattern=$($Case.expected.answerRegex)"
         Add-Check $checks "loan-state-unchanged" ($beforeJson -eq $afterJson) "deterministic loan state must be identical before and after"
         $auditTools = @($audit.tools)
@@ -239,7 +277,7 @@ function Run-ReadOnlyGuardCase($Case) {
     }
 }
 
-function Run-StatefulCase($Case) {
+function Run-StatefulCase($Case, $Identity) {
     $checks = New-Checks
     try {
         $turn1 = Invoke-Agent ([string]$Case.turn1)
@@ -251,6 +289,8 @@ function Run-StatefulCase($Case) {
         Add-Check $checks "new-request-id" ([string]$turn1.requestId -ne [string]$turn2.requestId) "turn1=$($turn1.requestId) turn2=$($turn2.requestId)"
         Add-Check $checks "turn1-audit-success" ([string]$audit1.status -eq "SUCCESS") "status=$($audit1.status)"
         Add-Check $checks "turn2-audit-success" ([string]$audit2.status -eq "SUCCESS") "status=$($audit2.status)"
+        Add-IdentityChecks $checks $audit1 $Identity "turn1"
+        Add-IdentityChecks $checks $audit2 $Identity "turn2"
         Add-Check $checks "turn1-tool" ((Find-Tool $audit1 ([string]$Case.expected.turn1ToolName) ([string]$Case.expected.loanNo)).Count -ge 1) "expected=$($Case.expected.turn1ToolName)/$($Case.expected.loanNo)"
         Add-Check $checks "turn2-fresh-tool" ((Find-Tool $audit2 ([string]$Case.expected.turn2ToolName) ([string]$Case.expected.loanNo)).Count -ge 1) "expected=$($Case.expected.turn2ToolName)/$($Case.expected.loanNo)"
         Add-Check $checks "turn2-history-from" ([int]$audit2.historyFromSequence -eq [int]$Case.expected.historyFromSequence) "actual=$($audit2.historyFromSequence)"
@@ -273,6 +313,32 @@ function Run-StatefulCase($Case) {
         return Finish-Case ([string]$Case.id) ([string]$Case.category) $checks @{}
     }
 }
+function Run-NotFoundCase($Case, $Identity) {
+    $checks = New-Checks
+    try {
+        $response = Invoke-Agent ([string]$Case.message)
+        $audit = Get-AgentAudit ([string]$response.requestId)
+        Add-Check $checks "audit-success" ([string]$audit.status -eq "SUCCESS") "audit status=$($audit.status)"
+        Add-IdentityChecks $checks $audit $Identity
+        Add-Check $checks "conversation-correlation" ([string]$audit.conversationId -eq [string]$response.conversationId) "response=$($response.conversationId) audit=$($audit.conversationId)"
+        $tools = Find-Tool $audit ([string]$Case.expected.toolName) ([string]$Case.expected.loanNo) "FAILED" ([string]$Case.expected.errorType)
+        Add-Check $checks "expected-failed-tool" ($tools.Count -ge 1) "expected=$($Case.expected.toolName)/$($Case.expected.loanNo)/FAILED/$($Case.expected.errorType)"
+        Add-Check $checks "not-found-answer" (Test-Regex ([string]$response.answer) ([string]$Case.expected.answerRegex)) "pattern=$($Case.expected.answerRegex)"
+        Add-Check $checks "no-fabricated-facts" (-not (Test-Regex ([string]$response.answer) ([string]$Case.expected.forbiddenAnswerRegex))) "forbidden pattern=$($Case.expected.forbiddenAnswerRegex)"
+        return Finish-Case ([string]$Case.id) ([string]$Case.category) $checks @{
+            requestId = [string]$response.requestId
+            conversationId = [string]$response.conversationId
+            provider = [string]$audit.provider
+            model = [string]$audit.model
+            durationMs = [long]$audit.durationMs
+            systemPromptHash = [string]$audit.systemPromptHash
+            observedTools = @($audit.tools | ForEach-Object { "$($_.toolName):$($_.loanNo):$($_.status):$($_.errorType)" })
+        }
+    } catch {
+        Add-Check $checks "execution" $false $_.Exception.Message
+        return Finish-Case ([string]$Case.id) ([string]$Case.category) $checks @{}
+    }
+}
 
 function Write-Reports($Report, [string]$OutputDirectory, [string]$Stamp) {
     New-Item -ItemType Directory -Force $OutputDirectory | Out-Null
@@ -288,6 +354,7 @@ function Write-Reports($Report, [string]$OutputDirectory, [string]$Stamp) {
     [void]$md.Add("- Outcome: **$($Report.outcome)**")
     [void]$md.Add("- Repository HEAD: ``$($Report.repositoryHead)``")
     [void]$md.Add("- Provider / model: ``$($Report.provider)`` / ``$($Report.model)``")
+    [void]$md.Add("- Requested provider / adapter / model: ``$($Report.requestedProvider)`` / ``$($Report.requestedAdapter)`` / ``$($Report.requestedModel)``")
     [void]$md.Add("- Business date: ``$($Report.businessDate)``")
     [void]$md.Add("- System prompt hash: ``$($Report.systemPromptHash)``")
     [void]$md.Add("- Cases: **$($Report.passed)/$($Report.caseCount) PASS**, $($Report.failed) FAIL")
@@ -311,27 +378,54 @@ function Write-Reports($Report, [string]$OutputDirectory, [string]$Stamp) {
 
 $manifest = Read-Manifest $ManifestPath
 Validate-Manifest $manifest
+$identity = Resolve-ProviderConfig $Provider $Model
 
 if ($ValidateOnly) {
-    Write-Host "PASS: evaluation manifest is valid ($($manifest.cases.Count) cases)."
+    Write-Host "PASS: evaluation manifest is valid ($($manifest.cases.Count) cases); provider identity is $($identity.provider)/$($identity.adapter)/$($identity.model)."
     exit 0
 }
 
 $stamp = (Get-Date).ToUniversalTime().ToString("yyyyMMdd-HHmmss")
 $outputDirectory = Join-Path (Get-Location) "target/evaluation"
 $head = (git rev-parse HEAD).Trim()
-$provider = "deepseek"
-$model = if ($env:LOANOPS_CHAT_MODEL) { $env:LOANOPS_CHAT_MODEL } else { "deepseek-chat" }
+$actualProvider = $identity.provider
+$actualModel = $identity.model
+$environmentBlockReason = $null
+if (-not $UseExistingApp) {
+    $environmentBlockReason = switch ($identity.provider) {
+        "deepseek" {
+            if ([string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) { "DEEPSEEK_API_KEY is not available in this process environment" }
+        }
+        "glm" {
+            if ([string]::IsNullOrWhiteSpace($env:GLM_API_KEY)) { "GLM_API_KEY is not available in this process environment" }
+        }
+        "ollama" {
+            $ollamaBaseUrl = if ([string]::IsNullOrWhiteSpace($env:OLLAMA_BASE_URL)) { "http://localhost:11434" } else { $env:OLLAMA_BASE_URL.TrimEnd('/') }
+            try {
+                $tags = Invoke-RestMethod -Method Get -Uri "$ollamaBaseUrl/api/tags" -TimeoutSec 5
+                $availableModels = @($tags.models | ForEach-Object { [string]$_.name })
+                if ($availableModels -notcontains $identity.model) {
+                    "Ollama model '$($identity.model)' is not available from the configured Ollama server"
+                }
+            } catch {
+                "Ollama is not reachable at the configured OLLAMA_BASE_URL"
+            }
+        }
+    }
+}
 
-if (-not $UseExistingApp -and [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY)) {
+if (-not [string]::IsNullOrWhiteSpace($environmentBlockReason)) {
     $blocked = [pscustomobject]@{
         schemaVersion = 1
         generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
         outcome = "ENV_BLOCKED"
-        reason = "DEEPSEEK_API_KEY is not available in this process environment"
+        reason = $environmentBlockReason
         repositoryHead = $head
-        provider = $provider
-        model = $model
+        provider = $identity.provider
+        model = $identity.model
+        requestedProvider = $identity.provider
+        requestedAdapter = $identity.adapter
+        requestedModel = $identity.model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone
         systemPromptHash = $null
@@ -341,7 +435,7 @@ if (-not $UseExistingApp -and [string]::IsNullOrWhiteSpace($env:DEEPSEEK_API_KEY
         cases = @()
     }
     $paths = Write-Reports $blocked $outputDirectory $stamp
-    Write-Host "ENV_BLOCKED: DEEPSEEK_API_KEY is not available. Reports: $($paths.json), $($paths.markdown)"
+    Write-Host "ENV_BLOCKED: $environmentBlockReason. Reports: $($paths.json), $($paths.markdown)"
     exit 2
 }
 
@@ -381,11 +475,14 @@ $javaArgs += "--server.port=$Port"
 $javaArgs += "--spring.profiles.active=ai"
 $javaArgs += "--loanops.business-date=$($manifest.businessDate)"
 $javaArgs += "--loanops.business-zone=$($manifest.businessZone)"
+$javaArgs += "--LOANOPS_CHAT_PROVIDER=$($identity.provider)"
+$javaArgs += "--LOANOPS_CHAT_ADAPTER=$($identity.adapter)"
+$javaArgs += "--LOANOPS_CHAT_MODEL=$($identity.model)"
 
 Write-Host "[2/4] Starting temporary AI application on port $Port using H2 + fixed demo data..."
 $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -RedirectStandardOutput $outLog -RedirectStandardError $errLog
 } else {
-    Write-Host "[1/4] Reusing existing Agent application on port $Port; no API key is read by this runner."
+    Write-Host "[1/4] Reusing existing Agent application on port $Port; requested identity is $($identity.provider)/$($identity.adapter)/$($identity.model)."
 }
 
     Wait-ForService "http://127.0.0.1:$Port/api/loans/LN-10002/status" $process
@@ -395,15 +492,16 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
     foreach ($case in $manifest.cases) {
         Write-Host "  - $($case.id)"
         $result = switch ([string]$case.type) {
-            "single-turn" { Run-SingleTurnCase $case }
-            "read-only-guard" { Run-ReadOnlyGuardCase $case }
-            "stateful-two-turn" { Run-StatefulCase $case }
+            "single-turn" { Run-SingleTurnCase $case $identity }
+            "read-only-guard" { Run-ReadOnlyGuardCase $case $identity }
+            "stateful-two-turn" { Run-StatefulCase $case $identity }
+            "not-found" { Run-NotFoundCase $case $identity }
             default { throw "Unsupported case type: $($case.type)" }
         }
         [void]$results.Add($result)
         if ($result.PSObject.Properties.Name -contains "provider") {
-            $provider = [string]$result.provider
-            $model = [string]$result.model
+            $actualProvider = [string]$result.provider
+            $actualModel = [string]$result.model
         }
     }
 
@@ -418,8 +516,11 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
         generatedAtUtc = (Get-Date).ToUniversalTime().ToString("o")
         outcome = $overallOutcome
         repositoryHead = $head
-        provider = $provider
-        model = $model
+        provider = $actualProvider
+        model = $actualModel
+        requestedProvider = $identity.provider
+        requestedAdapter = $identity.adapter
+        requestedModel = $identity.model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone
         systemPromptHash = $promptHash
@@ -441,8 +542,11 @@ $process = Start-Process -FilePath "java" -ArgumentList $javaArgs -PassThru -Red
         outcome = "ERROR"
         reason = $_.Exception.Message
         repositoryHead = $head
-        provider = $provider
-        model = $model
+        provider = $actualProvider
+        model = $actualModel
+        requestedProvider = $identity.provider
+        requestedAdapter = $identity.adapter
+        requestedModel = $identity.model
         businessDate = [string]$manifest.businessDate
         businessZone = [string]$manifest.businessZone
         systemPromptHash = $null

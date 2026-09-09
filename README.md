@@ -4,7 +4,7 @@ LoanOps Agent 是一个面向贷后运营场景的**可审计、可评测、只�
 
 它把两类事实源严格分开：贷款金额、日期、逾期和结清状态由确定性 Java 服务计算，并通过只读 Tools 提供；政策依据来自版本化 MySQL canonical store，经 BGE-M3 向量化、Qdrant 检索、上下文组装和引用校验后提供给模型。LLM 只负责语言理解、Tool 选择和回答组织，不自行计算金融事实，也不是政策事实来源。
 
-仓库提供完整的可复现实现、自动测试、固定评测集和真实 DeepSeek 端到端验收路径。
+仓库提供完整的可复现实现、自动测试、固定评测集，以及 DeepSeek、Ollama/qwen3:4b、GLM/glm-5.2 共用的真实端到端验收路径。
 
 ## 1. Project Overview
 
@@ -18,7 +18,7 @@ LoanOps Agent 是一个面向贷后运营场景的**可审计、可评测、只�
 - Java 21、Spring Boot、MyBatis-Plus、Flyway；
 - H2 默认验证路径与 MySQL 8 集成路径；
 - 3 个只读 Spring AI Tools；
-- DeepSeek Tool Calling 与持久化多轮 Conversation；
+- 可配置的 DeepSeek、Ollama/qwen3:4b、GLM/glm-5.2 Tool Calling 与持久化多轮 Conversation；
 - deterministic Policy Router、BGE-M3 embeddings、Qdrant derived vector index；
 - Policy Citation Validation、Agent / Tool / Policy Audit；
 - 固定 Agent baseline、30-case Policy RAG Gold Dataset 和真实 Hero E2E。
@@ -38,7 +38,7 @@ Agent 的价值是把自然语言问题映射到正确的只读能力，并把�
 
 ## 3. Hero Flow
 
-现有 PolicyAgentRealE2EIntegrationTest 是项目的 Hero evidence，不另建重复验收子系统。它使用真实 MySQL、Ollama/BGE-M3、Qdrant 和 DeepSeek，执行两轮对话：
+现有 PolicyAgentRealE2EIntegrationTest 是项目的 Hero evidence，不另建重复验收子系统。它使用真实 MySQL、Ollama/BGE-M3、Qdrant 和当前选择的 Chat Provider，执行两轮对话：
 
 1. LN-10002 为什么逾期？
    - Agent 调用 getOverdueDiagnosis；
@@ -52,7 +52,7 @@ Agent 的价值是把自然语言问题映射到正确的只读能力，并把�
    - 检索、命中、引用、Agent 和 Tool 均留下 Audit；
    - transcript 只包含 USER / ASSISTANT。
 
-测试只断言稳定 invariants，不固定整段 DeepSeek 自然语言；模型措辞不保证每次一致。
+测试只断言稳定 invariants，不固定任一 Provider 的整段自然语言；模型措辞不保证每次一致。
 
 ## 4. Architecture
 
@@ -63,7 +63,7 @@ flowchart TD
     Snapshot --> Router[Policy Router]
     Router --> Decision[Policy Decision]
 
-    Decision -->|NOT_REQUIRED| LLM[DeepSeek Tool Calling]
+    Decision -->|NOT_REQUIRED| LLM[Selected Chat Provider]
     LLM --> Tools[LoanOpsTools]
     Tools --> Java[Deterministic Java Services]
     Java --> LoanDB[(MySQL / H2 loan data)]
@@ -126,7 +126,7 @@ E2 direct Retriever metrics：Recall@1/3/5 = 1.0000，MRR = 1.0000。E1 先修�
 
 真实 DeepSeek adversarial review 为 **4/5 model-output semantic PASS**。ADV-04 中，恶意政策证据诱导模型省略了必需的 [P1]；该 case 不能记为 PASS，但 deterministic PolicyCitationValidator 拒绝了缺失引用的回答，阻止其提交为成功 transcript。这说明防线有效，不代表 prompt injection 或 hallucination 已解决。
 
-五例 live Agent baseline 是小型回归门禁，不具统计显著性；历史运行曾在未改配置时出现 Tool-choice variance，因此单次 5/5 不能表述为稳定率。
+六例 provider-neutral live Agent baseline 是小型回归门禁，不具统计显著性；历史运行曾在未改配置时出现 Tool-choice variance，因此单次 6/6 不能表述为稳定率。
 
 完整定义、E0/E1/E2 报告和历史 bad cases 见 [docs/EVALUATION.md](docs/EVALUATION.md) 与 [docs/POLICY_RAG_EVALUATION.md](docs/POLICY_RAG_EVALUATION.md)。
 
@@ -146,7 +146,7 @@ mvn clean verify
 ./scripts/verify-resume-mvp.ps1
 ~~~
 
-mvn clean verify 运行默认 H2 自动测试。verify-resume-mvp.ps1 还会打包并启动临时 JAR，以固定业务日期验证三笔 loan fixture；只有显式传入 -WithAi 时才额外调用 DeepSeek。它不启动或覆盖 Policy RAG、BGE-M3、Qdrant、政策引用或 Hero E2E。
+mvn clean verify 运行默认 H2 自动测试。verify-resume-mvp.ps1 仍是早期 DeepSeek smoke：它会打包并启动临时 JAR，以固定业务日期验证三笔 loan fixture，只有显式传入 -WithAi 时才调用 AI。统一的三 Provider 回归请使用 evaluate-agent-baseline.ps1；前者不覆盖 Policy RAG、BGE-M3、Qdrant、政策引用或 Hero E2E。
 
 ### Level 2 — local infrastructure
 
@@ -167,17 +167,17 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 
 ### Level 3 — real Agent + Policy Hero E2E
 
-Prerequisites：Java 21、健康的 MySQL/Qdrant、运行中的 Ollama 与 bge-m3、有效的 DEEPSEEK_API_KEY。
+Provider baseline 使用同一份六用例 manifest，可按固定身份运行：
 
 ~~~powershell
-docker compose up -d mysql qdrant
-ollama pull bge-m3
-$env:DEEPSEEK_API_KEY = "your-key"
-$env:POLICY_AGENT_REAL_E2E_TEST = "true"
-mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
+./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
+./scripts/evaluate-agent-baseline.ps1 -Provider ollama
+./scripts/evaluate-agent-baseline.ps1 -Provider glm
 ~~~
 
-该测试会自行 ingest synthetic policy、重建隔离 collection、调用真实 DeepSeek、覆盖 Tool + Conversation + Policy RAG + Citation + Audit，并在结束后清理 fixture。若 key 或外部服务缺失，只能报告 ENV_BLOCKED，不能将未执行结果记为 PASS。
+DeepSeek 和 GLM 分别需要当前进程中的 DEEPSEEK_API_KEY、GLM_API_KEY；Ollama 需要可访问的服务和 qwen3:4b。三 Provider 的 Policy Hero 还需要健康的 MySQL/Qdrant、Ollama/bge-m3，并通过 LOANOPS_CHAT_PROVIDER、LOANOPS_CHAT_ADAPTER、LOANOPS_CHAT_MODEL 选择运行身份。完整可复制命令见 docs/RUNBOOK.md。
+
+PolicyAgentRealE2EIntegrationTest 会自行 ingest synthetic policy、重建隔离 collection，并覆盖 Tool + Conversation + Policy RAG + Citation + Audit，结束后清理 fixture。缺少 key、model 或基础设施时只能报告 ENV_BLOCKED，不能将未执行或 skipped 记为 PASS。
 
 ### Policy evaluation
 
@@ -205,12 +205,12 @@ Prerequisites：Java 21、Docker MySQL/Qdrant、Ollama + bge-m3。脚本使用�
 
 - 未作为真实银行生产服务部署，也不包含真实银行生产数据；
 - 没有 RBAC、OAuth、rate limit、provider fallback 或 circuit breaker；
-- 只有 DeepSeek 完成当前 Tool Calling / Hero 真实验证，Qwen/GLM 未接入；
+- DeepSeek/deepseek-chat、Ollama/qwen3:4b、GLM/glm-5.2 已通过同一六用例 baseline 与 Policy Hero；这仍是有限本地验收，不代表生产稳定率；
 - 模型措辞和 Tool 选择具有随机性，固定评测集规模有限；
 - loan fixture 与 policy evaluation corpus 均为 synthetic validation data，不包含真实银行生产数据；
 - synthetic policy corpus 只用于验证版本、检索、引用与审计链路，不证明真实法规覆盖；
 - 不包含授信审批、评分、放款、催收执行、罚息、提前还款等业务；
-- CI 只覆盖 H2 full Maven verification 和 MySQL integration verification；Ollama、BGE-M3、Qdrant RAG E2 与 DeepSeek secret-dependent gates 保持本地 opt-in。
+- CI 只覆盖 H2 full Maven verification 和 MySQL integration verification；Ollama、BGE-M3、Qdrant RAG E2 与各 Provider 的外部依赖/secret gates 保持本地 opt-in。
 
 应用以 Java 21 Spring Boot JAR 运行；MySQL/Qdrant 仅作为本地 Docker Compose 基础设施。仓库没有 Dockerfile、Kubernetes、云部署、TLS、Secrets Manager 或生产运维声明。
 
