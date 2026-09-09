@@ -224,27 +224,28 @@ E0/E1/E2 指标仅属于固定 synthetic corpus。历史 mixed-002 generation ex
 
 ## 7. Optional Application Start
 
-只验证确定性 REST：
+推荐用本地 launcher 显式选择 Chat Provider；它会验证 Maven 使用 Java 21，并只为本次启动设置 provider / adapter / model：
 
 ~~~powershell
-$env:SERVER_PORT = "8080"
-mvn spring-boot:run
+./scripts/run-agent.ps1 -Provider ollama
+./scripts/run-agent.ps1 -Provider deepseek
+./scripts/run-agent.ps1 -Provider glm
 ~~~
 
-启用 MySQL + Policy + selected Chat runtime（以下为 DeepSeek 示例）：
+DeepSeek / GLM API Key 可分别放在仓库根目录 ignored `.env` 的 `DEEPSEEK_API_KEY` / `GLM_API_KEY` 中；Spring Boot Config Data 自动加载该文件，不需要每次把 key 复制到当前 PowerShell 环境。launcher 不读取、解析、打印或修改 `.env`。操作系统环境变量仍可作为 Spring Boot 原生高级 override。
+
+默认 launcher 使用 `ai` profile 并显式设置 `POLICY_RETRIEVAL_ENABLED=false`。启用完整的现有 MySQL + Policy + selected Chat runtime：
 
 ~~~powershell
-$env:SPRING_PROFILES_ACTIVE = "mysql,policy,ai"
-$env:DEEPSEEK_API_KEY = "your-key"
-$env:SERVER_PORT = "8080"
-mvn spring-boot:run
+./scripts/run-agent.ps1 -Provider ollama -WithPolicy
+# deepseek / glm 同样支持 -WithPolicy
 ~~~
 
-空 fresh database 只有 schema 和 synthetic loan fixture；Policy RAG 需要显式 ingest policy 并 rebuild index。Hero test 会自行完成隔离的 synthetic policy 准备，不需要新增 seeding subsystem。
+`-WithPolicy` 选择 `mysql,policy,ai` profiles 并显式设置 `POLICY_RETRIEVAL_ENABLED=true`。它要求 MySQL、Qdrant、Ollama、bge-m3、已 ingest 的 policy corpus 和已构建的 vector index 均可用，但不会自动启动基础设施、拉取模型、ingest 或 rebuild，也不会静默退回 Policy OFF。空 fresh database 只有 schema 和 synthetic loan fixture；Hero test 会自行完成隔离的 synthetic policy 准备，不需要新增 seeding subsystem。
 
 ### 7.1 Terminal Chat
 
-Terminal Chat 不会自动启动后端。先按上文启动启用了 `ai` profile 的 Agent，再在另一个 PowerShell 7 终端运行：
+Terminal Chat 不会自动启动后端。先按上文用 launcher 启动 Agent，再在另一个 PowerShell 7 终端运行：
 
 ~~~powershell
 ./scripts/chat.ps1
