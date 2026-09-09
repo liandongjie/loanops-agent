@@ -22,7 +22,7 @@ flowchart TD
     Router --> Decision[Policy Decision]
 
     subgraph FinancialFacts[Financial facts trust path]
-        Model[DeepSeek Tool Calling] --> Tools[LoanOpsTools]
+        Model[Selected Chat Provider] --> Tools[LoanOpsTools]
         Tools --> Service[Java deterministic services]
         Service --> LoanData[(MySQL or H2 loan data)]
     end
@@ -57,7 +57,7 @@ flowchart TD
 3. 写入 Agent Audit STARTED；
 4. PolicyRuntimeService 计算 NOT_REQUIRED / SUPPLEMENTAL / REQUIRED；
 5. 需要政策时构造 query、检索适用版本并建立 Grounding Context；
-6. SpringAiAgentChatGateway 把历史、政策上下文、当前问题和只读 Tools 交给 DeepSeek；
+6. SpringAiAgentChatGateway 把历史、政策上下文、当前问题和只读 Tools 交给当前选择的 Spring AI ChatModel；
 7. PolicyCitationValidator 校验回答中的引用；
 8. 在同一完成事务中追加 USER / ASSISTANT，并将 Agent Audit 标记为 SUCCESS。
 
@@ -68,7 +68,7 @@ flowchart TD
 ### 3.1 Financial Facts
 
 ~~~text
-DeepSeek Tool Calling
+Selected Chat Provider Tool Calling
   -> LoanOpsTools
   -> LoanStatusService
   -> LoanDiagnosisService
@@ -97,7 +97,7 @@ Policy Router
        -> Qdrant semantic candidates
   -> merge / rank with applicable-chunk filtering
   -> Grounding Context
-  -> DeepSeek
+  -> Selected Chat Provider
   -> PolicyCitationValidator
   -> Answer
 ~~~
@@ -178,9 +178,9 @@ AgentRequestCorrelationFilter 在 JSON 反序列化前生成服务端 UUID，并
 
 ## 8. Provider Boundary
 
-Agent 通过 Spring AI ChatClient 使用 DeepSeek，业务类不调用厂商 SDK。当前只有 DeepSeek 完成真实 Tool Calling 和 Hero E2E。
+Agent 通过 Spring AI ChatClient 使用当前选择的 ChatModel，业务类不调用厂商 SDK。DeepSeek/deepseek-chat、Ollama/qwen3:4b 和 GLM/glm-5.2 已复用同一 Gateway 完成真实 Tool Calling 与 Hero E2E。
 
-Qwen/GLM 仅保留历史接入分析，未接入、未验证，不能列为 supported provider。任何 Provider 变化都不得修改 RepaymentCalculator、LoanDiagnosisService、LoanOpsTools 的业务语义或数据库事实。
+固定映射为 deepseek -> deepseek、ollama -> ollama、glm -> zhipuai；Qwen 的当前运行身份是 ollama/qwen3:4b。任何 Provider 变化都不得修改 RepaymentCalculator、LoanDiagnosisService、LoanOpsTools 的业务语义或数据库事实。
 
 ## 9. Deliberate Non-goals
 

@@ -1,6 +1,6 @@
 ﻿{
   "schemaVersion": 1,
-  "name": "loanops-agent-pre-rag-baseline",
+  "name": "loanops-agent-provider-regression-baseline",
   "businessDate": "2026-08-23",
   "businessZone": "Asia/Shanghai",
   "cases": [
@@ -61,6 +61,19 @@
         "turn2AnswerRegex": "3,?500|3500",
         "historyFromSequence": 1,
         "historyToSequence": 2
+      }
+    },
+    {
+      "id": "unknown-loan-no-hallucination",
+      "category": "unknown-loan",
+      "type": "not-found",
+      "message": "LN-NOT-FOUND 为什么逾期？",
+      "expected": {
+        "toolName": "getOverdueDiagnosis",
+        "loanNo": "LN-NOT-FOUND",
+        "errorType": "LoanNotFoundException",
+        "answerRegex": "未找到|不存在|无法(?:获取|取得|确定|提供)|not found|cannot determine|unable to determine",
+        "forbiddenAnswerRegex": "(?:￥|¥|人民币|金额|欠款|未还|剩余)[^\\r\\n]{0,12}\\d|(?:逾期|超期)[^\\r\\n]{0,6}\\d+\\s*天|\\d+(?:\\.\\d+)?\\s*(?:元|天)"
       }
     }
   ]

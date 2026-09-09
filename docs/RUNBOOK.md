@@ -8,7 +8,7 @@
 |---|---|---|
 | 1. deterministic local | Java domain、H2、REST、Tool adapter、Conversation/Policy runtime tests | Java 21 + Maven |
 | 2. infrastructure | MySQL 8 / Flyway path、Qdrant service、local BGE-M3 availability | Docker + local Ollama |
-| 3. real Hero E2E | DeepSeek Tool Calling + Conversation + Policy RAG + Citation + Audit | MySQL + Qdrant + Ollama/bge-m3 + DeepSeek key |
+| 3. real Provider/Hero E2E | selected Chat Provider + Tool Calling + Conversation + Policy RAG + Citation + Audit | Provider prerequisite + MySQL + Qdrant + Ollama/bge-m3 |
 
 所有命令从仓库根目录使用 PowerShell 7。
 
@@ -18,7 +18,7 @@
 - Maven 3.9+；
 - Level 2/3：Docker；
 - Level 2/3 Policy：本机 Ollama；
-- Level 3：有效 DEEPSEEK_API_KEY。
+- Level 3：DeepSeek 需要有效 DEEPSEEK_API_KEY；Ollama 需要本地 qwen3:4b；GLM 需要有效 GLM_API_KEY。
 
 先确认实际运行时：
 
@@ -39,7 +39,7 @@ ollama --version
 mvn clean verify
 ~~~
 
-这条命令不需要 DeepSeek、MySQL、Qdrant 或 Ollama。真实外部 E2E tests 由环境变量 opt-in，默认 skip。
+这条命令不需要 Chat Provider、MySQL、Qdrant 或 Ollama。真实外部 E2E tests 由环境变量 opt-in，默认 skip。
 
 ### 3.2 Reproducible loan fixture smoke
 
@@ -84,28 +84,85 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 
 verify-mysql.ps1 会启动 MySQL、在 mysql Profile 下运行完整测试、启动实际 JAR、验证 LN-10002，并显式检查 Flyway V1-V3。V4-V6 由 Maven 中对应 integration tests 覆盖。
 
-## 5. Level 3 — Real Agent + Policy Hero E2E
+## 5. Level 3 — Real Provider Baseline + Policy Hero E2E
 
-### 5.1 Environment
+### 5.1 Unified six-case baseline
+
+同一个 runner 和 manifest 固定业务日期 `2026-08-23`、时区 `Asia/Shanghai`，并按 Provider 显式传入 provider / adapter / model。Secret 只来自当前进程或安全本地注入，不写入 YAML、日志或报告。
+
+DeepSeek：
+
+~~~powershell
+$env:DEEPSEEK_API_KEY = "your-key"
+./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
+~~~
+
+Ollama / qwen3:4b：
+
+~~~powershell
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+ollama pull qwen3:4b
+./scripts/evaluate-agent-baseline.ps1 -Provider ollama
+~~~
+
+GLM / glm-5.2：
+
+~~~powershell
+$env:GLM_API_KEY = "your-key"
+./scripts/evaluate-agent-baseline.ps1 -Provider glm
+~~~
+
+缺少当前 Provider 的 key、Ollama 服务或指定 model 时，self-start runner 报告 `ENV_BLOCKED`。不得用其他 model 替代，也不得把普通 chat 或答案文本当作 Tool Calling PASS。`-Model` 只用于显式验收 override；默认冻结身份是：
+
+~~~text
+deepseek / deepseek / deepseek-chat
+ollama   / ollama   / qwen3:4b
+glm      / zhipuai  / glm-5.2
+~~~
+
+### 5.2 Provider-aware Policy Hero
+
+先准备共享 Policy 基础设施：
 
 ~~~powershell
 docker compose up -d mysql qdrant
 ollama pull bge-m3
-
-$env:DEEPSEEK_API_KEY = "your-key"
 $env:POLICY_AGENT_REAL_E2E_TEST = "true"
+~~~
 
+每次只选择一组身份，然后运行同一个测试类。
+
+DeepSeek：
+
+~~~powershell
+$env:DEEPSEEK_API_KEY = "your-key"
+$env:LOANOPS_CHAT_PROVIDER = "deepseek"
+$env:LOANOPS_CHAT_ADAPTER = "deepseek"
+$env:LOANOPS_CHAT_MODEL = "deepseek-chat"
 mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
 ~~~
 
-DEEPSEEK_API_KEY 只能来自当前进程环境或安全的本地 secret 注入，不要写入 YAML、日志或提交文件。.env.example 只是变量清单，不是 production secrets solution。
-模型、base URL 和默认 collection 等可选覆盖项见 .env.example；Hero test 自行使用隔离 collection loanops_policy_agent_real_e2e。
+Ollama / qwen3:4b：
 
-### 5.2 Correct Maven/Surefire command on Windows
+~~~powershell
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+$env:LOANOPS_CHAT_PROVIDER = "ollama"
+$env:LOANOPS_CHAT_ADAPTER = "ollama"
+$env:LOANOPS_CHAT_MODEL = "qwen3:4b"
+mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
+~~~
 
-PowerShell 中把 -Dtest=... 作为一个带引号参数传给 Maven。测试类通过 @ActiveProfiles 启用 mysql、policy、ai，不需要另写 spring profile 参数。
+GLM / glm-5.2：
 
-外部环境或 key 缺失时，不运行并报告 ENV_BLOCKED；不要把 JUnit 的 opt-in skip 当成 Hero PASS。
+~~~powershell
+$env:GLM_API_KEY = "your-key"
+$env:LOANOPS_CHAT_PROVIDER = "glm"
+$env:LOANOPS_CHAT_ADAPTER = "zhipuai"
+$env:LOANOPS_CHAT_MODEL = "glm-5.2"
+mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
+~~~
+
+PowerShell 中把 `-Dtest=...` 作为一个带引号参数传给 Maven。测试类通过 `@ActiveProfiles` 启用 mysql、policy、ai，不需要另写 Spring profile。外部环境或 key 缺失时报告 `ENV_BLOCKED`；JUnit skipped 不是 Hero PASS。
 
 ### 5.3 Hero conversation and stable invariants
 
@@ -136,18 +193,13 @@ Turn 2（复用 Turn 1 的 conversationId）：
 - synthetic policy fixture 的适用条款进入 context；
 - P1 映射到命中条款，answer 包含有效 [P1]；
 - retrieval config/query/context/hit/citation 有 Audit；
-- transcript roles 恰为 USER / ASSISTANT / USER / ASSISTANT。
+- transcript roles 恰为 USER / ASSISTANT / USER / ASSISTANT；
+- Agent Audit identity 等于当前 Provider/model；
+- Policy retrieval embedding_model = bge-m3。
 
-PolicyAgentRealE2EIntegrationTest 会自行：
+PolicyAgentRealE2EIntegrationTest 会自行清理同名旧 fixture、ingest synthetic policy、由 MySQL canonical chunks 重建隔离 Qdrant collection、调用当前选择的 Chat Provider，并验证 Tool、Conversation、Policy RAG、Citation 和 Audit；AfterEach 清理请求、对话、政策 fixture 和 vector collection。
 
-1. 清理同名旧 fixture；
-2. ingest synthetic policy fixture；
-3. 由 MySQL canonical chunks 重建隔离 Qdrant collection；
-4. 调用真实 DeepSeek；
-5. 验证 Tool、Conversation、Policy RAG、Citation 和 Audit；
-6. 在 AfterEach 清理请求、对话、政策 fixture 和 vector collection。
-
-它不比较完整自然语言输出，也不保证每次 wording 相同。
+它不比较完整自然语言输出，也不保证每次 wording 或 Tool 选择相同。单次 PASS 不是稳定率结论。
 
 ## 6. Policy RAG Evaluation
 
@@ -179,7 +231,7 @@ $env:SERVER_PORT = "18080"
 mvn spring-boot:run
 ~~~
 
-启用 MySQL + Policy + DeepSeek runtime：
+启用 MySQL + Policy + selected Chat runtime（以下为 DeepSeek 示例）：
 
 ~~~powershell
 $env:SPRING_PROFILES_ACTIVE = "mysql,policy,ai"

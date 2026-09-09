@@ -17,7 +17,7 @@ The committed manifest is:
 evaluation/agent-baseline-cases.json
 ```
 
-It currently covers five live DeepSeek cases:
+It now covers six provider-neutral live Agent cases:
 
 | Case | Primary assertion |
 |---|---|
@@ -26,6 +26,7 @@ It currently covers five live DeepSeek cases:
 | `settlement-ln10003` | selects `getSettlementStatus` for `LN-10003` and states the settlement result |
 | `read-only-write-refusal` | refuses a write request and leaves the deterministic loan state unchanged |
 | `stateful-reference-and-fresh-tool` | resolves a follow-up reference from conversation history and performs a fresh current-fact Tool query |
+| `unknown-loan-no-hallucination` | records expected failed Tool Audit with `LoanNotFoundException` and rejects fabricated amount/day facts |
 
 Tool selection is asserted from Agent Tool Audit, not inferred from the wording of the answer.
 Natural-language answers are checked only for stable required facts or tolerant refusal wording;
@@ -44,7 +45,7 @@ baseline faster and more repeatable while preserving the same deterministic seed
 
 Policy RAG must later be compared with the same manifest and fixed business date.
 
-## Validate the manifest without DeepSeek
+## Validate the manifest without a live Provider
 
 This path does not require an API key or an external provider:
 
@@ -55,7 +56,7 @@ This path does not require an API key or an external provider:
 Expected result:
 
 ```text
-PASS: evaluation manifest is valid (5 cases).
+PASS: evaluation manifest is valid (6 cases); provider identity is deepseek/deepseek/deepseek-chat.
 ```
 
 ## Run the live baseline
@@ -64,23 +65,32 @@ Requirements:
 
 - JDK 21 on the current `PATH`;
 - Maven 3.9+;
-- `DEEPSEEK_API_KEY` available only as an environment variable;
-- optional `DEEPSEEK_MODEL` (defaults to `deepseek-chat`).
+- DeepSeek: `DEEPSEEK_API_KEY` in the current process;
+- Ollama: reachable `OLLAMA_BASE_URL` (default `http://localhost:11434`) and the requested model installed;
+- GLM: `GLM_API_KEY` in the current process.
 
-Example:
+The same runner freezes the acceptance defaults and permits an explicit `-Model` override:
 
 ```powershell
 $env:DEEPSEEK_API_KEY = "your-key"
-$env:DEEPSEEK_MODEL = "deepseek-chat"
+.\scripts\evaluate-agent-baseline.ps1 -Provider deepseek
 
-.\scripts\evaluate-agent-baseline.ps1
+$env:OLLAMA_BASE_URL = "http://localhost:11434"
+.\scripts\evaluate-agent-baseline.ps1 -Provider ollama
+
+$env:GLM_API_KEY = "your-key"
+.\scripts\evaluate-agent-baseline.ps1 -Provider glm
 ```
+
+The default identities are `deepseek/deepseek/deepseek-chat`, `ollama/ollama/qwen3:4b`,
+and `glm/zhipuai/glm-5.2`. The temporary JVM receives provider, adapter and model explicitly.
 
 If an already-started Agent is available, the runner can reuse it without reading the API key from the current shell. This is useful for manual/local verification:
 
 ```powershell
 .\scripts\evaluate-agent-baseline.ps1 `
   -Port 18080 `
+  -Provider ollama `
   -UseExistingApp
 ```
 
@@ -103,8 +113,8 @@ business zone = Asia/Shanghai
 It packages the application, starts a temporary AI process, runs the manifest, queries existing Agent
 Audit endpoints, writes reports, and then stops the temporary process.
 
-If `DEEPSEEK_API_KEY` is unavailable, the runner emits `ENV_BLOCKED` rather than reporting PASS.
-The API key is never written to the report.
+If the selected Provider prerequisite is unavailable, the runner emits `ENV_BLOCKED` rather than reporting PASS.
+Secrets are never written to the report.
 
 ## Reports
 
@@ -117,7 +127,7 @@ target/evaluation/
 Each live run produces timestamped JSON and Markdown reports plus `*-latest` copies. Metadata includes:
 
 - repository HEAD SHA;
-- provider/model;
+- requested provider/adapter/model and actual Audit provider/model;
 - fixed business date/zone;
 - system prompt hash observed from Agent Audit;
 - PASS/FAIL case counts;
@@ -126,12 +136,16 @@ Each live run produces timestamped JSON and Markdown reports plus `*-latest` cop
 - observed Tool Audit evidence;
 - failed structured checks, if any.
 
-A case passes only when all required checks pass. The baseline does not claim statistical significance
-from one model run and does not use LLM-as-a-Judge.
+A case passes only when Tool Audit status, loan number, Agent Audit status, conversation boundaries,
+requested-vs-actual provider/model identity and case-specific answer checks all pass. The unknown-loan
+case expects a failed Tool Audit with `LoanNotFoundException`; this expected domain failure is not a
+baseline failure when the answer abstains without fabricated facts. The baseline does not claim
+statistical significance from one model run and does not use LLM-as-a-Judge.
 
-Historical unchanged-configuration execution also showed Tool-choice variance in the live provider
-path. Preserve that failure evidence: a later single 5/5 run is a regression artifact, not proof of a
-statistically stable Tool-selection rate.
+Historical unchanged-configuration execution showed Tool-choice variance, including the local
+Ollama/qwen3:4b path. Preserve the first failure and allow at most one unchanged-config repeat when
+the evidence is model selection variance. A later single 6/6 run is a regression artifact, not proof
+of a statistically stable Tool-selection rate.
 
 ## Interpretation
 
@@ -154,7 +168,7 @@ visible when retrieval context is introduced.
 
 Phase 7.4 adds a separate fixed Gold corpus, real BGE-M3/Qdrant evaluation, E0/E1 reports and a
 representative DeepSeek grounding review. Metric definitions and commands are documented in
-`docs/POLICY_RAG_EVALUATION.md`; this does not replace the five-case Agent baseline above.
+`docs/POLICY_RAG_EVALUATION.md`; this does not replace the six-case Agent baseline above.
 
 ## Phase 8 Runtime Hardening / Adversarial Review
 

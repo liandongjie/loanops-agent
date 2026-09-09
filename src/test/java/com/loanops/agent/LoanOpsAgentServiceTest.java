@@ -3,6 +3,7 @@ package com.loanops.agent;
 import com.loanops.audit.AgentAuditHandle;
 import com.loanops.audit.AgentAuditService;
 import com.loanops.audit.AgentRequestAuditContext;
+import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.conversation.ConversationHistoryFingerprint;
 import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.conversation.ConversationTurnStore;
@@ -57,7 +58,7 @@ class LoanOpsAgentServiceTest {
     private final PolicyRuntimeService policyRuntimeService = mock(PolicyRuntimeService.class);
     private final LoanOpsAgentService service = new LoanOpsAgentService(
             gateway, auditService, completionService, turnStore, metrics, policyRuntimeService,
-            "deepseek", "deepseek-chat", 4000);
+            new LoanOpsAgentProperties("deepseek", "deepseek", "deepseek-chat"), 4000);
 
     @BeforeEach
     void defaults() {
