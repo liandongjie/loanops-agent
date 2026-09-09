@@ -165,6 +165,18 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 ./scripts/verify-mysql.ps1
 ~~~
 
+### Terminal Chat
+
+先按现有方式启动启用了 `ai` profile 的 Agent，再在另一个 PowerShell 7 终端运行：
+
+~~~powershell
+./scripts/chat.ps1
+# 非默认端口：
+./scripts/chat.ps1 -BaseUrl "http://127.0.0.1:8080"
+~~~
+
+`/new` 只清空客户端当前 conversation ID，`/id` 显示当前 ID，`/exit` 退出。Terminal 通过 `POST /api/agent/chat` 使用服务端持久化的 Conversation，不保存或重发本地历史。Provider 由已启动服务的配置决定，Terminal 不选择 Provider 或管理 secret。当前调用为同步完整响应，不是 token streaming。
+
 ### Level 3 — real Agent + Policy Hero E2E
 
 Provider baseline 使用同一份六用例 manifest，可按固定身份运行：
