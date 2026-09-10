@@ -1,5 +1,7 @@
 package com.loanops.agent;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.dto.AgentAuditResponse;
 import com.loanops.dto.AgentChatResult;
@@ -33,14 +35,10 @@ import static org.assertj.core.api.Assertions.assertThat;
 @ActiveProfiles({"mysql", "policy", "ai"})
 class PolicyAgentRealE2EIntegrationTest {
 
-    private static final String TITLE = "Phase 7.3 E2E 合成政策测试文档";
+    private static final String TITLE = "贷后管理评测规程";
     private static final String SOURCE_TYPE = "DEMO_SYNTHETIC";
-    private static final String TEXT = """
-            第六章 贷后管理
-            第四十四条 贷款发生逾期后，贷款人应当依法采取催收、协议重组、债权转让或者核销等方式进行处置。
-            第四十五条 贷款全部清偿后，贷款人应当及时出具结清证明，办理相关解押手续，并妥善保存还款凭证。
-            """;
 
+    @Autowired private ObjectMapper objectMapper;
     @Autowired private PolicyIngestionService ingestionService;
     @Autowired private PolicyIndexRebuilder indexRebuilder;
     @Autowired private PolicyVectorIndex vectorIndex;
@@ -54,14 +52,20 @@ class PolicyAgentRealE2EIntegrationTest {
     private String documentId;
 
     @Test
-    void realMysqlBgeQdrantChatToolsConversationAndAuditGate() {
+    void realMysqlBgeQdrantChatToolsConversationAndAuditGate() throws Exception {
         cleanupFixture();
         vectorIndex.replaceAll(List.of());
+        JsonNode corpus = objectMapper.readTree(
+                new org.springframework.core.io.ClassPathResource("policy/demo-policy-corpus.json").getInputStream());
+        JsonNode document = corpus.path("documents").get(0);
+        JsonNode version = document.path("versions").get(1);
+        LocalDate effectiveFrom = LocalDate.parse(version.path("effectiveFrom").asText());
         IngestionResult ingestion = ingestionService.ingest(
-                new DocumentInput(TITLE, "DEMO_POLICY", "LoanOps Demo", SOURCE_TYPE, "CN"),
-                new VersionInput("2026版", "DEMO-E2E-2026", LocalDate.of(2026, 1, 1),
-                        LocalDate.of(2026, 1, 1), LocalDate.of(2026, 1, 1), null,
-                        VersionStatus.ACTIVE, "urn:loanops:demo:phase-7.3-e2e", null, TEXT));
+                new DocumentInput(TITLE, document.path("documentType").asText(),
+                        document.path("issuer").asText(), SOURCE_TYPE, document.path("jurisdiction").asText()),
+                new VersionInput(version.path("versionLabel").asText(), version.path("documentNumber").asText(),
+                        effectiveFrom, effectiveFrom, effectiveFrom, null, VersionStatus.ACTIVE,
+                        version.path("sourceUri").asText(), null, version.path("structuredText").asText()));
         documentId = ingestion.documentId();
         assertThat(indexRebuilder.rebuild()).isGreaterThanOrEqualTo(2);
 
