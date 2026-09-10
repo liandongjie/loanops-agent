@@ -256,7 +256,9 @@ Terminal Chat 不会自动启动后端。先按上文用 launcher 启动 Agent�
 - `/id`：显示当前 conversation ID；
 - `/exit`：退出。
 
-Terminal 只调用现有 `POST /api/agent/chat`，本地不保存 USER/ASSISTANT 历史。Provider identity 仍由运行中服务的 `LOANOPS_CHAT_PROVIDER`、`LOANOPS_CHAT_ADAPTER`、`LOANOPS_CHAT_MODEL` 决定；Terminal 不读取 Provider secret。当前 API 会等待并返回完整 answer，不提供 token streaming。
+Terminal 默认调用 `POST /api/agent/chat/stream`，使用 SSE 增量读取；原 `POST /api/agent/chat` 继续提供同步完整 JSON response。客户端本地只保存 current conversation ID，不保存或重发 USER/ASSISTANT 历史。Provider identity 仍由运行中服务的 `LOANOPS_CHAT_PROVIDER`、`LOANOPS_CHAT_ADAPTER`、`LOANOPS_CHAT_MODEL` 决定；Terminal 不读取 Provider secret。
+
+Streaming 主要改善 perceived latency / TTFT，不保证降低总请求耗时。`NOT_REQUIRED` 回答会真正增量输出；Policy `SUPPLEMENTAL` / `REQUIRED` 回答会在引用校验与 successful-turn atomic commit 后一次性显示。任何 `delta` 在 `done` 前都是 provisional；只有 `done` 且 `committed=true` 才表示服务端提交成功。若收到 `error` 或 stream 在 `done` 前异常结束，Terminal 不更新 current conversation ID。
 
 ## 8. Proxy Note
 

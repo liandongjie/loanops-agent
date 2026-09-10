@@ -24,8 +24,11 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.content;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -169,5 +172,54 @@ class AgentControllerTest {
         String requestId = result.getResponse().getHeader("X-Request-Id");
         assertThat(requestId).matches("[0-9a-f-]{36}").isNotEqualTo("client-controlled-id");
         verify(agentService).chatWithRequestId(requestId, null, MESSAGE);
+    }
+
+
+    @Test
+    void streamingEndpointUsesSseAndSharesOneServerRequestIdAcrossEvents() throws Exception {
+        when(agentService.streamWithRequestId(anyString(), isNull(), eq(MESSAGE)))
+                .thenAnswer(invocation -> {
+                    String requestId = invocation.getArgument(0);
+                    return reactor.core.publisher.Flux.just(
+                            AgentStreamEvent.start(requestId, CONVERSATION_ID, "STREAMING"),
+                            AgentStreamEvent.delta("8500.00"),
+                            AgentStreamEvent.done(requestId, CONVERSATION_ID));
+                });
+
+        MvcResult pending = mockMvc.perform(post("/api/agent/chat/stream")
+                        .accept(MediaType.TEXT_EVENT_STREAM)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"" + MESSAGE + "\"}"))
+                .andExpect(request().asyncStarted())
+                .andExpect(header().exists("X-Request-Id"))
+                .andReturn();
+        String requestId = pending.getResponse().getHeader("X-Request-Id");
+
+        MvcResult completed = mockMvc.perform(asyncDispatch(pending))
+                .andExpect(status().isOk())
+                .andExpect(content().contentTypeCompatibleWith(MediaType.TEXT_EVENT_STREAM))
+                .andReturn();
+
+        String body = completed.getResponse().getContentAsString();
+        assertThat(body)
+                .contains("event:start", "event:delta", "event:done", requestId, CONVERSATION_ID)
+                .doesNotContain("event:error");
+        assertThat(body.indexOf("event:start")).isLessThan(body.indexOf("event:delta"));
+        assertThat(body.indexOf("event:delta")).isLessThan(body.indexOf("event:done"));
+        verify(agentService).streamWithRequestId(requestId, null, MESSAGE);
+    }
+
+    @Test
+    void streamingPreflightValidationStillUsesExistingHttpErrorContract() throws Exception {
+        doThrow(new InvalidAgentMessageException())
+                .when(agentService).streamWithRequestId(anyString(), isNull(), eq("   "));
+
+        mockMvc.perform(post("/api/agent/chat/stream")
+                        .accept(MediaType.TEXT_EVENT_STREAM, MediaType.APPLICATION_JSON)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"message\":\"   \"}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(header().exists("X-Request-Id"))
+                .andExpect(jsonPath("$.code").value("INVALID_AGENT_MESSAGE"));
     }
 }

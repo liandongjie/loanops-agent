@@ -7,9 +7,15 @@ import com.loanops.config.LoanOpsAgentProperties;
 import com.loanops.conversation.ConversationSnapshot;
 import com.loanops.conversation.ConversationTurnStore;
 import com.loanops.dto.AgentChatResult;
+import com.loanops.exception.AgentProviderUnavailableException;
 import com.loanops.exception.ConversationConflictException;
+import com.loanops.exception.ConversationNotFoundException;
 import com.loanops.exception.InvalidAgentMessageException;
+import com.loanops.exception.LoanNotFoundException;
+import com.loanops.exception.PolicyCitationValidationException;
+import com.loanops.exception.PolicyRetrievalException;
 import com.loanops.observability.AgentMetrics;
+import com.loanops.observability.AgentReactorContextConfiguration;
 import com.loanops.policy.PolicyGroundingContextFactory;
 import com.loanops.policy.PolicyRetrievalDecision;
 import com.loanops.policy.PolicyRetrievalStatus;
@@ -21,7 +27,12 @@ import org.slf4j.MDC;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Service;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.publisher.SignalType;
 
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.UUID;
 
 @Service
@@ -95,11 +106,7 @@ public class LoanOpsAgentService {
                         ? turnStore.create()
                         : turnStore.resolve(conversationId);
             } catch (RuntimeException | Error conversationFailure) {
-                long durationMs = elapsedMillis(requestStartedNanos);
-                metrics.recordRequest("FAILED", durationMs);
-                log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
-                        requestId, conversationId, agentProperties.provider(), agentProperties.model(), durationMs,
-                        conversationFailure.getClass().getSimpleName());
+                recordConversationFailure(requestId, conversationId, requestStartedNanos, conversationFailure);
                 throw conversationFailure;
             }
 
@@ -160,6 +167,216 @@ public class LoanOpsAgentService {
         }
     }
 
+    public Flux<AgentStreamEvent> streamWithRequestId(
+            String requestId, String conversationId, String message) {
+        long requestStartedNanos = System.nanoTime();
+        String auditableMessage = message == null ? "" : message;
+        String previousRequestId = MDC.get(REQUEST_ID_MDC_KEY);
+        MDC.put(REQUEST_ID_MDC_KEY, requestId);
+
+        try {
+            if (message == null || message.isBlank()) {
+                AgentAuditHandle auditHandle = beginAudit(
+                        requestId, auditableMessage, null, null, requestStartedNanos);
+                failBeforeModel(auditHandle, new InvalidAgentMessageException());
+            }
+            if (message.length() > maxMessageCharacters) {
+                AgentAuditHandle auditHandle = beginAudit(
+                        requestId, auditableMessage, null, null, requestStartedNanos);
+                failBeforeModel(auditHandle, new InvalidAgentMessageException(
+                        "message must not exceed " + maxMessageCharacters + " characters"));
+            }
+
+            ConversationSnapshot snapshot;
+            try {
+                snapshot = conversationId == null || conversationId.isBlank()
+                        ? turnStore.create()
+                        : turnStore.resolve(conversationId);
+            } catch (RuntimeException | Error conversationFailure) {
+                recordConversationFailure(requestId, conversationId, requestStartedNanos, conversationFailure);
+                throw conversationFailure;
+            }
+
+            AgentAuditHandle auditHandle = beginAudit(
+                    requestId, auditableMessage, snapshot, chatGateway.systemPrompt(), requestStartedNanos);
+            PolicyRuntimePreparation policyPreparation;
+            AgentRequestAuditContext.State auditContext;
+            try (AgentRequestAuditContext.Scope ignored = AgentRequestAuditContext.open(requestId)) {
+                auditContext = AgentRequestAuditContext.current().orElseThrow();
+                try {
+                    policyPreparation = policyRuntimeService.prepare(requestId, snapshot, message);
+                } catch (RuntimeException | Error policyFailure) {
+                    failRequest(auditHandle, snapshot.conversationId(), policyFailure);
+                    throw new IllegalStateException("unreachable");
+                }
+            }
+
+            log.info("Agent streaming request started requestId={} conversationId={} provider={} model={}",
+                    requestId, snapshot.conversationId(), agentProperties.provider(), agentProperties.model());
+
+            AtomicBoolean terminalized = new AtomicBoolean();
+            AgentStreamEvent start = AgentStreamEvent.start(
+                    requestId,
+                    snapshot.conversationId(),
+                    policyPreparation.context().decision() == PolicyRetrievalDecision.NOT_REQUIRED
+                            ? "STREAMING"
+                            : "BUFFERED_POLICY");
+            AgentChatRequest gatewayRequest = new AgentChatRequest(
+                    snapshot.history(), message, policyPreparation.context());
+            Flux<AgentStreamEvent> body = policyPreparation.context().decision()
+                    == PolicyRetrievalDecision.NOT_REQUIRED
+                    ? streamIncrementally(auditHandle, snapshot, message, policyPreparation,
+                            gatewayRequest, terminalized)
+                    : streamBufferedPolicy(auditHandle, snapshot, message, policyPreparation,
+                            gatewayRequest, terminalized);
+
+            return Flux.concat(Flux.just(start), body)
+                    .onErrorResume(failure -> {
+                        terminalizeStreamingFailure(
+                                auditHandle, snapshot.conversationId(), failure, terminalized);
+                        return Flux.just(streamError(requestId, snapshot.conversationId(), failure));
+                    })
+                    .doFinally(signalType -> {
+                        if (signalType == SignalType.CANCEL) {
+                            terminalizeStreamingFailure(
+                                    auditHandle,
+                                    snapshot.conversationId(),
+                                    new CancellationException("Agent stream was cancelled"),
+                                    terminalized);
+                        }
+                    })
+                    .contextWrite(context -> context
+                            .put(AgentReactorContextConfiguration.AUDIT_CONTEXT_KEY, auditContext)
+                            .put(AgentReactorContextConfiguration.REQUEST_ID_CONTEXT_KEY, requestId));
+        } finally {
+            restoreRequestId(previousRequestId);
+        }
+    }
+
+    private Flux<AgentStreamEvent> streamIncrementally(
+            AgentAuditHandle auditHandle,
+            ConversationSnapshot snapshot,
+            String message,
+            PolicyRuntimePreparation policyPreparation,
+            AgentChatRequest gatewayRequest,
+            AtomicBoolean terminalized) {
+        StringBuilder answer = new StringBuilder();
+        Flux<AgentStreamEvent> deltas = chatGateway.stream(gatewayRequest)
+                .filter(chunk -> chunk != null && !chunk.isEmpty())
+                .doOnNext(answer::append)
+                .map(AgentStreamEvent::delta);
+        Mono<AgentStreamEvent> done = Mono.fromCallable(() -> commitStreamingTurn(
+                auditHandle, snapshot, message, answer.toString(), policyPreparation, terminalized).done());
+        return deltas.concatWith(done);
+    }
+
+    private Flux<AgentStreamEvent> streamBufferedPolicy(
+            AgentAuditHandle auditHandle,
+            ConversationSnapshot snapshot,
+            String message,
+            PolicyRuntimePreparation policyPreparation,
+            AgentChatRequest gatewayRequest,
+            AtomicBoolean terminalized) {
+        Mono<String> answer;
+        if (policyPreparation.context().decision() == PolicyRetrievalDecision.REQUIRED
+                && policyPreparation.context().retrievalStatus() == PolicyRetrievalStatus.NO_MATCH) {
+            answer = Mono.just(PolicyGroundingContextFactory.NO_MATCH_NOTICE);
+        } else {
+            answer = chatGateway.stream(gatewayRequest)
+                    .collectList()
+                    .map(chunks -> String.join("", chunks));
+        }
+        return answer.flatMapMany(rawAnswer -> {
+            CommittedStream committed = commitStreamingTurn(
+                    auditHandle, snapshot, message, rawAnswer, policyPreparation, terminalized);
+            return Flux.just(AgentStreamEvent.delta(committed.answer()), committed.done());
+        });
+    }
+
+    private CommittedStream commitStreamingTurn(
+            AgentAuditHandle auditHandle,
+            ConversationSnapshot snapshot,
+            String message,
+            String answer,
+            PolicyRuntimePreparation policyPreparation,
+            AtomicBoolean terminalized) {
+        String validatedAnswer = policyRuntimeService.validateAndRecord(answer, policyPreparation);
+        if (!terminalized.compareAndSet(false, true)) {
+            throw new CancellationException("Agent stream was cancelled before commit");
+        }
+
+        long durationMs;
+        try {
+            durationMs = completionService.complete(
+                    auditHandle, snapshot, message, validatedAnswer);
+        } catch (ConversationConflictException conflict) {
+            completeClaimedStreamingFailure(auditHandle, snapshot.conversationId(), conflict);
+            throw conflict;
+        } catch (RuntimeException | Error completionFailure) {
+            metrics.recordAuditWriteFailure("agent_success");
+            completeClaimedStreamingFailure(
+                    auditHandle, snapshot.conversationId(), completionFailure);
+            throw completionFailure;
+        }
+
+        metrics.recordRequest("SUCCESS", durationMs);
+        log.info("Agent streaming request completed requestId={} conversationId={} outcome=SUCCESS provider={} model={} durationMs={}",
+                auditHandle.requestId(), snapshot.conversationId(), agentProperties.provider(),
+                agentProperties.model(), durationMs);
+        return new CommittedStream(
+                validatedAnswer,
+                AgentStreamEvent.done(auditHandle.requestId(), snapshot.conversationId()));
+    }
+
+    private void terminalizeStreamingFailure(
+            AgentAuditHandle auditHandle,
+            String conversationId,
+            Throwable failure,
+            AtomicBoolean terminalized) {
+        if (!terminalized.compareAndSet(false, true)) {
+            return;
+        }
+        completeClaimedStreamingFailure(auditHandle, conversationId, failure);
+    }
+
+    private void completeClaimedStreamingFailure(
+            AgentAuditHandle auditHandle, String conversationId, Throwable failure) {
+        long durationMs = completeFailure(auditHandle, failure);
+        metrics.recordRequest("FAILED", durationMs);
+        log.info("Agent streaming request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                auditHandle.requestId(), conversationId, agentProperties.provider(), agentProperties.model(),
+                durationMs, failure.getClass().getSimpleName());
+    }
+
+    private AgentStreamEvent streamError(String requestId, String conversationId, Throwable failure) {
+        if (failure instanceof AgentProviderUnavailableException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "AGENT_PROVIDER_UNAVAILABLE", "Agent provider is temporarily unavailable");
+        }
+        if (failure instanceof LoanNotFoundException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "LOAN_NOT_FOUND", failure.getMessage());
+        }
+        if (failure instanceof ConversationNotFoundException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "CONVERSATION_NOT_FOUND", failure.getMessage());
+        }
+        if (failure instanceof ConversationConflictException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "CONVERSATION_CONFLICT", failure.getMessage());
+        }
+        if (failure instanceof PolicyRetrievalException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "POLICY_RETRIEVAL_UNAVAILABLE", "Required policy retrieval is temporarily unavailable");
+        }
+        if (failure instanceof PolicyCitationValidationException) {
+            return AgentStreamEvent.error(requestId, conversationId,
+                    "POLICY_CITATION_VALIDATION_FAILED", "Policy answer validation failed");
+        }
+        return AgentStreamEvent.error(requestId, conversationId,
+                "AGENT_STREAM_FAILED", "Agent stream failed");
+    }
+
     private AgentAuditHandle beginAudit(
             String requestId,
             String message,
@@ -198,6 +415,15 @@ public class LoanOpsAgentService {
         throw (Error) failure;
     }
 
+    private void recordConversationFailure(
+            String requestId, String conversationId, long requestStartedNanos, Throwable failure) {
+        long durationMs = elapsedMillis(requestStartedNanos);
+        metrics.recordRequest("FAILED", durationMs);
+        log.info("Agent request completed requestId={} conversationId={} outcome=FAILED provider={} model={} durationMs={} errorType={}",
+                requestId, conversationId, agentProperties.provider(), agentProperties.model(), durationMs,
+                failure.getClass().getSimpleName());
+    }
+
     private long completeFailure(AgentAuditHandle auditHandle, Throwable failure) {
         long durationMs = auditService.elapsedMillis(auditHandle);
         try {
@@ -222,4 +448,6 @@ public class LoanOpsAgentService {
             MDC.put(REQUEST_ID_MDC_KEY, previousRequestId);
         }
     }
+
+    private record CommittedStream(String answer, AgentStreamEvent done) {}
 }

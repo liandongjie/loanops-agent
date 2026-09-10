@@ -124,4 +124,69 @@ class SpringAiAgentChatGatewayTest {
                 .isSameAs(codingFailure)
                 .isNotInstanceOf(AgentProviderUnavailableException.class);
     }
+
+
+    @Test
+    void streamUsesSamePromptAndEmitsOrderedChunks() {
+        ChatClient.Builder builder = mock(ChatClient.Builder.class);
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec request = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.StreamResponseSpec response = mock(ChatClient.StreamResponseSpec.class);
+        LoanOpsTools tools = mock(LoanOpsTools.class);
+        when(builder.defaultTools(tools)).thenReturn(builder);
+        when(builder.build()).thenReturn(chatClient);
+        when(chatClient.prompt()).thenReturn(request);
+        when(request.system(anyString())).thenReturn(request);
+        when(request.messages(anyList())).thenReturn(request);
+        when(request.user(anyString())).thenReturn(request);
+        when(request.stream()).thenReturn(response);
+        when(response.content()).thenReturn(reactor.core.publisher.Flux.just("当前", "应还", "8500元"));
+        SpringAiAgentChatGateway gateway = new SpringAiAgentChatGateway(
+                builder, tools, new PolicyContextRenderer());
+        List<ConversationHistoryMessage> history = List.of(
+                new ConversationHistoryMessage(1, "USER", "first question"),
+                new ConversationHistoryMessage(2, "ASSISTANT", "first answer"));
+        PolicyGroundingContext context = new PolicyGroundingContext(
+                PolicyRetrievalDecision.NOT_REQUIRED, PolicyRetrievalStatus.NOT_RUN,
+                LocalDate.of(2026, 1, 1), "hash", List.of(), "");
+
+        assertThat(gateway.stream(new AgentChatRequest(history, "current question", context))
+                .collectList().block()).containsExactly("当前", "应还", "8500元");
+
+        verify(request).system(gateway.systemPrompt());
+        ArgumentCaptor<List<Message>> messages = ArgumentCaptor.forClass(List.class);
+        verify(request).messages(messages.capture());
+        assertThat(messages.getValue()).extracting(Message::getText)
+                .containsExactly("first question", "first answer");
+        verify(request).user("current question");
+        verify(builder).defaultTools(tools);
+    }
+
+    @Test
+    void streamTranslatesProviderFailureWhenFluxSignalsAsynchronously() {
+        ChatClient.Builder builder = mock(ChatClient.Builder.class);
+        ChatClient chatClient = mock(ChatClient.class);
+        ChatClient.ChatClientRequestSpec request = mock(ChatClient.ChatClientRequestSpec.class);
+        ChatClient.StreamResponseSpec response = mock(ChatClient.StreamResponseSpec.class);
+        LoanOpsTools tools = mock(LoanOpsTools.class);
+        when(builder.defaultTools(tools)).thenReturn(builder);
+        when(builder.build()).thenReturn(chatClient);
+        when(chatClient.prompt()).thenReturn(request);
+        when(request.system(anyString())).thenReturn(request);
+        when(request.messages(anyList())).thenReturn(request);
+        when(request.user(anyString())).thenReturn(request);
+        when(request.stream()).thenReturn(response);
+        ResourceAccessException timeout = new ResourceAccessException("provider URL timed out");
+        when(response.content()).thenReturn(reactor.core.publisher.Flux.error(timeout));
+        SpringAiAgentChatGateway gateway = new SpringAiAgentChatGateway(
+                builder, tools, new PolicyContextRenderer());
+        PolicyGroundingContext context = new PolicyGroundingContext(
+                PolicyRetrievalDecision.NOT_REQUIRED, PolicyRetrievalStatus.NOT_RUN,
+                LocalDate.of(2026, 1, 1), "hash", List.of(), "");
+
+        assertThatThrownBy(() -> gateway.stream(
+                new AgentChatRequest(List.of(), "question", context)).blockLast())
+                .isInstanceOf(AgentProviderUnavailableException.class)
+                .hasCause(timeout);
+    }
 }

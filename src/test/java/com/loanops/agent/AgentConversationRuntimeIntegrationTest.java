@@ -257,6 +257,97 @@ class AgentConversationRuntimeIntegrationTest {
         assertThat(auditMapper.selectById(requestId)).isNull();
     }
 
+
+
+    @Test
+    void streamingProviderFailureLeavesFailedAuditAndNoTranscript() {
+        String requestId = UUID.randomUUID().toString();
+        AgentProviderUnavailableException failure =
+                new AgentProviderUnavailableException(new RuntimeException("provider unavailable"));
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.error(failure));
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(requestId, null, "question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "error");
+        AgentAuditResponse audit = auditService.get(requestId);
+        assertThat(audit.status()).isEqualTo("FAILED");
+        assertThat(audit.errorType()).isEqualTo("AgentProviderUnavailableException");
+        assertThat(messages(audit.conversationId())).isEmpty();
+    }
+
+    @Test
+    void streamingToolFailureKeepsRequestCorrelationAndNoTranscript() {
+        String requestId = UUID.randomUUID().toString();
+        when(gateway.stream(any())).thenReturn(
+                reactor.core.publisher.Flux.just("invoke")
+                        .publishOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                        .map(ignored -> {
+                            tools.getCurrentRepayment("LN-NOT-FOUND");
+                            return "unreachable";
+                        }));
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId(requestId, null, "check missing loan")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "error");
+        assertThat(((AgentStreamEvent.ErrorData) events.getLast().data()).code())
+                .isEqualTo("LOAN_NOT_FOUND");
+        AgentAuditResponse audit = auditService.get(requestId);
+        assertThat(audit.status()).isEqualTo("FAILED");
+        assertThat(audit.tools()).singleElement().satisfies(tool -> {
+            assertThat(tool.sequenceNo()).isEqualTo(1);
+            assertThat(tool.status()).isEqualTo("FAILED");
+        });
+        assertThat(messages(audit.conversationId())).isEmpty();
+    }
+
+    @Test
+    void streamingConflictKeepsOnlyWinningTranscriptAndEmitsNoDone() {
+        ConversationSnapshot initial = turnStore.create();
+        String staleRequestId = UUID.randomUUID().toString();
+        String winningRequestId = UUID.randomUUID().toString();
+        when(gateway.stream(any())).thenAnswer(invocation -> {
+            ConversationSnapshot competingSnapshot = turnStore.resolve(initial.conversationId());
+            AgentAuditHandle competingAudit = auditService.begin(
+                    winningRequestId, "winning question", competingSnapshot, SYSTEM_PROMPT);
+            completionService.complete(
+                    competingAudit, competingSnapshot, "winning question", "winning answer");
+            return reactor.core.publisher.Flux.just("stale ", "answer");
+        });
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(
+                        staleRequestId, initial.conversationId(), "stale question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "delta", "error");
+        assertThat(auditService.get(staleRequestId).status()).isEqualTo("FAILED");
+        assertThat(messages(initial.conversationId()))
+                .extracting(ConversationMessageEntity::getRequestId)
+                .containsExactly(winningRequestId, winningRequestId);
+    }
+
+    @Test
+    void streamingCancellationFailsAuditAndLeavesNoTranscript() {
+        String requestId = UUID.randomUUID().toString();
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.never());
+        java.util.List<AgentStreamEvent> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        reactor.core.Disposable subscription = service.streamWithRequestId(requestId, null, "question")
+                .subscribe(events::add);
+        subscription.dispose();
+
+        assertThat(events).extracting(AgentStreamEvent::event).containsExactly("start");
+        AgentAuditResponse audit = auditService.get(requestId);
+        assertThat(audit.status()).isEqualTo("FAILED");
+        assertThat(audit.errorType()).isEqualTo("CancellationException");
+        assertThat(messages(audit.conversationId())).isEmpty();
+    }
+
     private List<ConversationMessageEntity> messages(String conversationId) {
         return messageMapper.selectList(new LambdaQueryWrapper<ConversationMessageEntity>()
                 .eq(ConversationMessageEntity::getConversationId, conversationId)

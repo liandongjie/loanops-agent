@@ -73,6 +73,7 @@ class PolicyAgentRuntimeIntegrationTest {
         jdbc.update("DELETE FROM conversation");
         when(gateway.systemPrompt()).thenReturn(SYSTEM_PROMPT);
         when(gateway.chat(any())).thenReturn("普通金融回答");
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("普通金融回答"));
     }
 
     @AfterEach
@@ -205,6 +206,109 @@ class PolicyAgentRuntimeIntegrationTest {
         assertThat(audit.status()).isEqualTo("FAILED");
         assertThat(messages(audit.conversationId())).isZero();
         assertThat(policyStatus(requestId)).isEqualTo("MATCHED");
+        assertThat(cited(requestId)).isFalse();
+    }
+
+
+
+    @Test
+    void requiredStreamingBuffersUntilCitationValidationAndAtomicCommit() {
+        when(policyRetriever.retrieve(anyString(), eq(AS_OF))).thenReturn(matchedResult());
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("依据条款", "处理。[P1]"));
+        String requestId = UUID.randomUUID().toString();
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(
+                        requestId, null, "个人贷款逾期以后按规定应该如何处置？")
+                .doOnNext(event -> {
+                    if (event.event().equals("delta")) {
+                        AgentAuditResponse audit = agentAuditService.get(requestId);
+                        assertThat(audit.status()).isEqualTo("SUCCESS");
+                        assertThat(messages(audit.conversationId())).isEqualTo(2);
+                    }
+                })
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "done");
+        assertThat(((AgentStreamEvent.StartData) events.getFirst().data()).deliveryMode())
+                .isEqualTo("BUFFERED_POLICY");
+        assertThat(((AgentStreamEvent.DeltaData) events.get(1).data()).text())
+                .isEqualTo("依据条款处理。[P1]");
+        assertThat(cited(requestId)).isTrue();
+    }
+
+    @Test
+    void supplementalStreamingKeepsToolAuditCorrelationAcrossThreadHop() {
+        when(policyRetriever.retrieve(anyString(), eq(AS_OF))).thenReturn(matchedResult());
+        when(gateway.stream(any())).thenReturn(
+                reactor.core.publisher.Flux.just("invoke")
+                        .publishOn(reactor.core.scheduler.Schedulers.boundedElastic())
+                        .map(ignored -> {
+                            tools.getOverdueDiagnosis("LN-10002");
+                            return "贷款逾期3天，未偿还3500.00元；依据见[P1]。";
+                        }));
+        String requestId = UUID.randomUUID().toString();
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(
+                        requestId, null, "LN-10002 已经逾期了，按照规定现在应该怎么处理？")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "done");
+        AgentAuditResponse audit = agentAuditService.get(requestId);
+        assertThat(audit.status()).isEqualTo("SUCCESS");
+        assertThat(audit.tools()).singleElement().satisfies(tool -> {
+            assertThat(tool.status()).isEqualTo("SUCCESS");
+            assertThat(tool.sequenceNo()).isEqualTo(1);
+            assertThat(tool.loanNo()).isEqualTo("LN-10002");
+        });
+    }
+
+    @Test
+    void requiredStreamingNoMatchSkipsModelAndCommitsNoticeBeforeVisibility() {
+        when(policyRetriever.retrieve(anyString(), eq(AS_OF)))
+                .thenReturn(new RetrievalResult("未知政策", AS_OF, List.of()));
+        String requestId = UUID.randomUUID().toString();
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(
+                        requestId, null, "按规定是否允许一个知识库中不存在的操作？")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "done");
+        assertThat(((AgentStreamEvent.DeltaData) events.get(1).data()).text())
+                .isEqualTo(PolicyGroundingContextFactory.NO_MATCH_NOTICE);
+        verify(gateway, never()).stream(any());
+        assertThat(agentAuditService.get(requestId).status()).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void streamingMissingCitationEmitsNoPolicyAnswerAndNoDone() {
+        assertStreamingCitationFailure("没有引用");
+    }
+
+    @Test
+    void streamingUnknownCitationEmitsNoPolicyAnswerAndNoDone() {
+        assertStreamingCitationFailure("伪造引用[P99]");
+    }
+
+    private void assertStreamingCitationFailure(String draft) {
+        when(policyRetriever.retrieve(anyString(), eq(AS_OF))).thenReturn(matchedResult());
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just(draft));
+        String requestId = UUID.randomUUID().toString();
+
+        List<AgentStreamEvent> events = service.streamWithRequestId(
+                        requestId, null, "个人贷款逾期后按规定如何处置？")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "error");
+        AgentStreamEvent.ErrorData error = (AgentStreamEvent.ErrorData) events.getLast().data();
+        assertThat(error.code()).isEqualTo("POLICY_CITATION_VALIDATION_FAILED");
+        assertThat(error.committed()).isFalse();
+        AgentAuditResponse audit = agentAuditService.get(requestId);
+        assertThat(audit.status()).isEqualTo("FAILED");
+        assertThat(messages(audit.conversationId())).isZero();
         assertThat(cited(requestId)).isFalse();
     }
 

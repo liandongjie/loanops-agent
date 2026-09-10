@@ -227,6 +227,178 @@ class LoanOpsAgentServiceTest {
         assertThat(AgentRequestAuditContext.current()).isEmpty();
     }
 
+
+
+    @Test
+    void normalStreamEmitsOrderedDeltasThenCommitsAggregatedAnswer() {
+        AgentAuditHandle handle = startedAudit("request");
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("当前", "应还", "8500元"));
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "question", "当前应还8500元"))
+                .thenReturn(25L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "delta", "delta", "done");
+        assertThat(events.subList(1, 4))
+                .extracting(event -> ((AgentStreamEvent.DeltaData) event.data()).text())
+                .containsExactly("当前", "应还", "8500元");
+        verify(policyRuntimeService).validateAndRecord("当前应还8500元", POLICY_PREPARATION);
+        verify(completionService).complete(handle, EMPTY_SNAPSHOT, "question", "当前应还8500元");
+        verify(metrics).recordRequest("SUCCESS", 25L);
+    }
+
+    @Test
+    void asynchronousProviderFailureEmitsErrorAndFailsAuditWithoutCommit() {
+        AgentAuditHandle handle = startedAudit("request");
+        com.loanops.exception.AgentProviderUnavailableException failure =
+                new com.loanops.exception.AgentProviderUnavailableException(
+                        new RuntimeException("provider failed"));
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.error(failure));
+        when(auditService.completeFailure(handle, failure)).thenReturn(9L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "error");
+        AgentStreamEvent.ErrorData error = (AgentStreamEvent.ErrorData) events.getLast().data();
+        assertThat(error.code()).isEqualTo("AGENT_PROVIDER_UNAVAILABLE");
+        assertThat(error.committed()).isFalse();
+        verify(auditService).completeFailure(handle, failure);
+        verify(completionService, never()).complete(any(), any(), anyString(), anyString());
+        verify(metrics).recordRequest("FAILED", 9L);
+    }
+
+    @Test
+    void conversationConflictAfterProvisionalDeltaEmitsErrorWithoutDone() {
+        AgentAuditHandle handle = startedAudit("request");
+        ConversationConflictException conflict =
+                new ConversationConflictException(CONVERSATION_ID, 0, 0);
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("provisional"));
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "question", "provisional"))
+                .thenThrow(conflict);
+        when(auditService.completeFailure(handle, conflict)).thenReturn(12L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "error");
+        assertThat(((AgentStreamEvent.ErrorData) events.getLast().data()).code())
+                .isEqualTo("CONVERSATION_CONFLICT");
+        verify(auditService).completeFailure(handle, conflict);
+    }
+
+    @Test
+    void cancellationFailsAuditAndNeverCommitsTurn() {
+        AgentAuditHandle handle = startedAudit("request");
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.never());
+        when(auditService.completeFailure(eq(handle), any(java.util.concurrent.CancellationException.class)))
+                .thenReturn(7L);
+        java.util.List<AgentStreamEvent> events = new java.util.concurrent.CopyOnWriteArrayList<>();
+
+        reactor.core.Disposable subscription = service
+                .streamWithRequestId("request", null, "question")
+                .subscribe(events::add);
+        subscription.dispose();
+
+        assertThat(events).extracting(AgentStreamEvent::event).containsExactly("start");
+        verify(auditService).completeFailure(
+                eq(handle), any(java.util.concurrent.CancellationException.class));
+        verify(completionService, never()).complete(any(), any(), anyString(), anyString());
+        verify(metrics).recordRequest("FAILED", 7L);
+    }
+
+    @Test
+    void bufferedPolicyDoesNotExposeAnswerUntilValidationAndCommitSucceed() {
+        PolicyRuntimePreparation preparation = preparation(
+                PolicyRetrievalDecision.SUPPLEMENTAL, PolicyRetrievalStatus.MATCHED);
+        when(policyRuntimeService.prepare("request", EMPTY_SNAPSHOT, "policy question"))
+                .thenReturn(preparation);
+        when(policyRuntimeService.validateAndRecord("policy [P1]", preparation))
+                .thenReturn("policy [P1]");
+        AgentAuditHandle handle = startedAudit("request");
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("policy ", "[P1]"));
+        when(completionService.complete(handle, EMPTY_SNAPSHOT, "policy question", "policy [P1]"))
+                .thenReturn(30L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "policy question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "done");
+        assertThat(((AgentStreamEvent.StartData) events.getFirst().data()).deliveryMode())
+                .isEqualTo("BUFFERED_POLICY");
+        assertThat(((AgentStreamEvent.DeltaData) events.get(1).data()).text())
+                .isEqualTo("policy [P1]");
+        InOrder ordered = inOrder(policyRuntimeService, completionService);
+        ordered.verify(policyRuntimeService).validateAndRecord("policy [P1]", preparation);
+        ordered.verify(completionService).complete(
+                handle, EMPTY_SNAPSHOT, "policy question", "policy [P1]");
+    }
+
+    @Test
+    void policyCitationFailureEmitsNoAnswerDeltaAndNoDone() {
+        PolicyRuntimePreparation preparation = preparation(
+                PolicyRetrievalDecision.REQUIRED, PolicyRetrievalStatus.MATCHED);
+        when(policyRuntimeService.prepare("request", EMPTY_SNAPSHOT, "policy question"))
+                .thenReturn(preparation);
+        com.loanops.exception.PolicyCitationValidationException failure =
+                new com.loanops.exception.PolicyCitationValidationException("missing citation");
+        when(policyRuntimeService.validateAndRecord("unsafe draft", preparation)).thenThrow(failure);
+        AgentAuditHandle handle = startedAudit("request");
+        when(gateway.stream(any())).thenReturn(reactor.core.publisher.Flux.just("unsafe ", "draft"));
+        when(auditService.completeFailure(handle, failure)).thenReturn(11L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "policy question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "error");
+        assertThat(((AgentStreamEvent.ErrorData) events.getLast().data()).code())
+                .isEqualTo("POLICY_CITATION_VALIDATION_FAILED");
+        verify(completionService, never()).complete(any(), any(), anyString(), anyString());
+        verify(auditService).completeFailure(handle, failure);
+    }
+
+    @Test
+    void requiredNoMatchSkipsModelAndCommitsDeterministicNoticeBeforeDelta() {
+        PolicyRuntimePreparation preparation = preparation(
+                PolicyRetrievalDecision.REQUIRED, PolicyRetrievalStatus.NO_MATCH);
+        when(policyRuntimeService.prepare("request", EMPTY_SNAPSHOT, "policy question"))
+                .thenReturn(preparation);
+        when(policyRuntimeService.validateAndRecord(
+                com.loanops.policy.PolicyGroundingContextFactory.NO_MATCH_NOTICE, preparation))
+                .thenReturn(com.loanops.policy.PolicyGroundingContextFactory.NO_MATCH_NOTICE);
+        AgentAuditHandle handle = startedAudit("request");
+        when(completionService.complete(
+                handle, EMPTY_SNAPSHOT, "policy question",
+                com.loanops.policy.PolicyGroundingContextFactory.NO_MATCH_NOTICE)).thenReturn(15L);
+
+        List<AgentStreamEvent> events = service
+                .streamWithRequestId("request", null, "policy question")
+                .collectList().block();
+
+        assertThat(events).extracting(AgentStreamEvent::event)
+                .containsExactly("start", "delta", "done");
+        verify(gateway, never()).stream(any());
+    }
+
+    private PolicyRuntimePreparation preparation(
+            PolicyRetrievalDecision decision, PolicyRetrievalStatus status) {
+        return new PolicyRuntimePreparation(
+                new PolicyGroundingContext(decision, status, LocalDate.of(2026, 1, 1),
+                        "hash", List.of(), ""),
+                new PolicyRetrievalAuditHandle("retrieval", 1L));
+    }
+
     private AgentAuditHandle startedAudit(String requestId) {
         AgentAuditHandle handle = new AgentAuditHandle(requestId, 1L);
         when(auditService.begin(eq(requestId), anyString(), eq(EMPTY_SNAPSHOT), eq(SYSTEM_PROMPT)))
