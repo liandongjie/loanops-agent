@@ -15,6 +15,7 @@ import org.springframework.ai.retry.TransientAiException;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.RestClientException;
+import reactor.core.publisher.Flux;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -58,21 +59,38 @@ public class SpringAiAgentChatGateway implements AgentChatGateway {
 
     @Override
     public String chat(AgentChatRequest request) {
+        try {
+            return prompt(request).call().content();
+        } catch (TransientAiException | NonTransientAiException | RestClientException providerFailure) {
+            throw new AgentProviderUnavailableException(providerFailure);
+        }
+    }
+
+    @Override
+    public Flux<String> stream(AgentChatRequest request) {
+        return Flux.defer(() -> prompt(request).stream().content())
+                .onErrorMap(this::translateProviderFailure);
+    }
+
+    private ChatClient.ChatClientRequestSpec prompt(AgentChatRequest request) {
         List<Message> priorMessages = new ArrayList<>();
         if (request.policyGroundingContext().decision() != PolicyRetrievalDecision.NOT_REQUIRED) {
             priorMessages.add(new SystemMessage(contextRenderer.render(request.policyGroundingContext())));
         }
         request.history().stream().map(this::toSpringAiMessage).forEach(priorMessages::add);
-        try {
-            return chatClient.prompt()
-                    .system(SYSTEM_PROMPT)
-                    .messages(priorMessages)
-                    .user(request.currentUserMessage())
-                    .call()
-                    .content();
-        } catch (TransientAiException | NonTransientAiException | RestClientException providerFailure) {
-            throw new AgentProviderUnavailableException(providerFailure);
+        return chatClient.prompt()
+                .system(SYSTEM_PROMPT)
+                .messages(priorMessages)
+                .user(request.currentUserMessage());
+    }
+
+    private Throwable translateProviderFailure(Throwable failure) {
+        if (failure instanceof TransientAiException
+                || failure instanceof NonTransientAiException
+                || failure instanceof RestClientException) {
+            return new AgentProviderUnavailableException(failure);
         }
+        return failure;
     }
 
     private Message toSpringAiMessage(ConversationHistoryMessage message) {

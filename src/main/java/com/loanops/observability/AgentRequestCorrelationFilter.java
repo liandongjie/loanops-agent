@@ -20,13 +20,15 @@ public class AgentRequestCorrelationFilter extends OncePerRequestFilter {
     public static final String REQUEST_ATTRIBUTE = "loanops.agent.requestId";
     private static final String MDC_KEY = "requestId";
     private static final String AGENT_CHAT_PATH = "/api/agent/chat";
+    private static final String AGENT_CHAT_STREAM_PATH = "/api/agent/chat/stream";
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
         String requestUri = request.getRequestURI();
         String contextPath = request.getContextPath();
         String applicationPath = requestUri.substring(contextPath.length());
-        return !AGENT_CHAT_PATH.equals(applicationPath);
+        return !AGENT_CHAT_PATH.equals(applicationPath)
+                && !AGENT_CHAT_STREAM_PATH.equals(applicationPath);
     }
 
     @Override

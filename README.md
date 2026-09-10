@@ -192,7 +192,9 @@ Agent 启动后，在另一个 PowerShell 7 终端运行：
 ./scripts/chat.ps1
 ~~~
 
-`/new` 只清空客户端当前 conversation ID，`/id` 显示当前 ID，`/exit` 退出。Terminal 通过 `POST /api/agent/chat` 使用服务端持久化的 Conversation，不保存或重发本地历史。Provider 由已启动服务的配置决定，Terminal 不选择 Provider 或管理 secret。当前调用为同步完整响应，不是 token streaming。
+`/new` 只清空客户端当前 conversation ID，`/id` 显示当前 ID，`/exit` 退出。Terminal 默认通过 `POST /api/agent/chat/stream` 的 SSE 响应增量显示回答；原 `POST /api/agent/chat` 同步 JSON API 保持兼容。Terminal 不保存或重发本地历史，Provider 仍由已启动服务决定，Terminal 不选择 Provider 或管理 secret。
+
+Streaming 主要改善 perceived latency / TTFT，不保证降低总请求耗时。纯金融 `NOT_REQUIRED` turn 会真正增量输出；`SUPPLEMENTAL` / `REQUIRED` Policy turn 会在服务端完成引用校验和成功提交后，一次性下发安全回答。所有 `delta` 在 `done` 前都是 provisional；只有 `done` 且 `committed=true` 表示服务端 turn 已正式提交。
 
 ### Level 3 — real Agent + Policy Hero E2E
 

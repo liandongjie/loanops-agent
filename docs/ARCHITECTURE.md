@@ -117,7 +117,17 @@ PolicyIngestionService 将规范化文本、内容 hash、版本有效期和结�
 
 Policy Context 是不可信证据数据，不是系统指令。需要政策引用时，PolicyCitationValidator 拒绝缺失或未知 [Pn] 的回答。
 
-## 4. Conversation Runtime
+## 4. Streaming Delivery Contract
+
+现有 `POST /api/agent/chat` 保持同步 JSON contract；新增 `POST /api/agent/chat/stream` 在同一 Spring MVC / Tomcat 应用中返回 SSE，没有第二套 Agent 或 Provider adapter。两条路径仍共用 `LoanOpsAgentService -> AgentChatGateway -> SpringAiAgentChatGateway -> configured ChatModel`，Spring AI 原生 streaming 继续负责 Tool Calling。
+
+SSE 事件只有 `start`、`delta`、`done`、`error`。纯金融 `NOT_REQUIRED` turn 使用 `STREAMING` delivery mode，模型 chunk 可作为 provisional delta 立即下发，同时在服务端聚合完整 answer；Policy `SUPPLEMENTAL` / `REQUIRED` 使用 `BUFFERED_POLICY`，draft 在服务端缓冲，只有 PolicyCitationValidator 和 successful-turn atomic commit 均成功后才下发完整安全 answer。REQUIRED + NO_MATCH 仍跳过模型并提交 deterministic notice。
+
+`done(committed=true)` 是客户端认定成功的唯一标志。Provider、Tool、Citation 或 optimistic CAS 失败会发 `error(committed=false)`，不发 `done`；在失败前已经显示的非 Policy delta 不会进入成功 transcript。如果在 successful-turn commit 开始前观察到 subscription cancel，Agent Audit 以 FAILED 结束且不追加成功 turn。如果 cancellation 或 network loss 与服务端 commit 并发，或发生在 commit 开始后，服务端 turn 仍可能已经提交，即使客户端未收到最终 `done`；此时客户端将 commit 状态视为 unknown。AgentRequestAuditContext 与 MDC requestId 通过 Micrometer Context Propagation 和 Reactor Context 跨线程恢复，使 streaming Tool Audit 继续使用相同 requestId 和递增 sequence。
+
+Streaming 改善 perceived latency / TTFT，不保证降低总响应耗时。Policy path 有意 buffer，因此不能声称所有回答都做 token streaming。
+
+## 5. Conversation Runtime
 
 Conversation 使用 Flyway V4 的 conversation / conversation_message 表持久化。
 
@@ -130,7 +140,7 @@ Conversation 使用 Flyway V4 的 conversation / conversation_message 表持久�
 
 Hero 第二轮从 prior USER 内容恢复 LN-10002，而不是依赖 Assistant 输出。
 
-## 5. Data and Migrations
+## 6. Data and Migrations
 
 Flyway 是数据库结构的唯一版本来源：
 
@@ -147,7 +157,7 @@ H2 是默认快速开发/测试路径；MySQL 8 是本地集成、Policy RAG 和
 
 V2 loan data、Policy RAG evaluation corpus 和 Hero policy 都是 synthetic validation fixture，不代表真实银行数据或完整法规。
 
-## 6. Audit and Observability
+## 7. Audit and Observability
 
 Audit 与运行时 Observability 分层：
 
@@ -162,7 +172,7 @@ AgentRequestCorrelationFilter 在 JSON 反序列化前生成服务端 UUID，并
 
 当前 GET /api/agent/audits/{requestId} 没有 RBAC，只是本地验证接口，不是生产暴露方案。
 
-## 7. Runtime Failure Semantics
+## 8. Runtime Failure Semantics
 
 - 当前消息最大 4,000 字符；
 - 模型可见历史最多 20 条消息和 12,000 字符；
@@ -176,13 +186,13 @@ AgentRequestCorrelationFilter 在 JSON 反序列化前生成服务端 UUID，并
 
 这些边界降低失败放大和错误落盘风险，但不代表完整生产韧性；当前没有 provider fallback、circuit breaker、RBAC 或 rate limiting。
 
-## 8. Provider Boundary
+## 9. Provider Boundary
 
 Agent 通过 Spring AI ChatClient 使用当前选择的 ChatModel，业务类不调用厂商 SDK。DeepSeek/deepseek-chat、Ollama/qwen3:4b 和 GLM/glm-5.2 已复用同一 Gateway 完成真实 Tool Calling 与 Hero E2E。
 
 固定映射为 deepseek -> deepseek、ollama -> ollama、glm -> zhipuai；Qwen 的当前运行身份是 ollama/qwen3:4b。任何 Provider 变化都不得修改 RepaymentCalculator、LoanDiagnosisService、LoanOpsTools 的业务语义或数据库事实。
 
-## 9. Deliberate Non-goals
+## 10. Deliberate Non-goals
 
 - Multi-Agent：没有自然角色分解；
 - MCP：现有 Tools 都是本地 Java 能力，没有跨进程/跨应用共享需求；

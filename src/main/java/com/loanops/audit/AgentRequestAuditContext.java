@@ -21,6 +21,18 @@ public final class AgentRequestAuditContext {
         return Optional.ofNullable(CURRENT.get());
     }
 
+    public static void restore(State state) {
+        if (state == null) {
+            CURRENT.remove();
+        } else {
+            CURRENT.set(state);
+        }
+    }
+
+    public static void clear() {
+        CURRENT.remove();
+    }
+
     public static final class State {
         private final String requestId;
         private final AtomicInteger sequence = new AtomicInteger();
