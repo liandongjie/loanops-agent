@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class PolicyRagEvaluationIntegrationTest {
 
     private static final Path CASES_PATH = Path.of("evaluation/policy-rag-cases.json");
-    private static final Path CORPUS_PATH = Path.of("evaluation/policy-rag-corpus.json");
+    private static final Path CORPUS_PATH = Path.of("src/main/resources/policy/demo-policy-corpus.json");
 
     @Autowired private ObjectMapper objectMapper;
     @Autowired private PolicyIngestionService ingestionService;

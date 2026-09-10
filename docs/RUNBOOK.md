@@ -234,14 +234,26 @@ E0/E1/E2 指标仅属于固定 synthetic corpus。历史 mixed-002 generation ex
 
 DeepSeek / GLM API Key 可分别放在仓库根目录 ignored `.env` 的 `DEEPSEEK_API_KEY` / `GLM_API_KEY` 中；Spring Boot Config Data 自动加载该文件，不需要每次把 key 复制到当前 PowerShell 环境。launcher 不读取、解析、打印或修改 `.env`。操作系统环境变量仍可作为 Spring Boot 原生高级 override。
 
-默认 launcher 使用 `ai` profile 并显式设置 `POLICY_RETRIEVAL_ENABLED=false`。启用完整的现有 MySQL + Policy + selected Chat runtime：
+默认 launcher 使用 `ai` profile 并显式设置 `POLICY_RETRIEVAL_ENABLED=false`。首次在普通 local MySQL/Qdrant 上体验 Policy RAG 时，先启动依赖并显式初始化 synthetic/demo corpus：
+
+~~~powershell
+docker compose up -d mysql qdrant
+ollama pull bge-m3
+./scripts/bootstrap-local-policy.ps1
+~~~
+
+bootstrap 使用 `mysql,policy,local-policy-bootstrap` profiles 和 non-web one-shot Spring 进程。它先读取完整 corpus 并检查 canonical store，再通过现有 PolicyIngestionService ingest，最后通过 PolicyIndexRebuilder 把 MySQL active/indexable chunks 整体写入 application-policy.yml 当前配置的 Qdrant collection。它不直接写 Policy 表、不生成 embedding、不直接 PUT vectors，也不会操作其他 collection。
+
+允许的已有状态只有：空 store、全部属于当前 `LOCAL_DEMO_SYNTHETIC` corpus，或该 corpus 的部分数据。发现其他或未知 Policy document 时会在任何写入和 rebuild 前拒绝并以非零状态退出；没有 force/reset/delete 选项。MySQL、Ollama/bge-m3、Qdrant、corpus 或 rebuild 失败都会显式失败，修复后可安全重跑。
+
+bootstrap 成功后启用完整的现有 MySQL + Policy + selected Chat runtime：
 
 ~~~powershell
 ./scripts/run-agent.ps1 -Provider ollama -WithPolicy
 # deepseek / glm 同样支持 -WithPolicy
 ~~~
 
-`-WithPolicy` 选择 `mysql,policy,ai` profiles 并显式设置 `POLICY_RETRIEVAL_ENABLED=true`。它要求 MySQL、Qdrant、Ollama、bge-m3、已 ingest 的 policy corpus 和已构建的 vector index 均可用，但不会自动启动基础设施、拉取模型、ingest 或 rebuild，也不会静默退回 Policy OFF。空 fresh database 只有 schema 和 synthetic loan fixture；Hero test 会自行完成隔离的 synthetic policy 准备，不需要新增 seeding subsystem。
+`-WithPolicy` 选择 `mysql,policy,ai` profiles 并显式设置 `POLICY_RETRIEVAL_ENABLED=true`。日常应用启动不会自动 seed 或 rebuild。Evaluation 使用独立的 `loanops_policy_rag_eval` MySQL database 和 Qdrant collection，并由 runner/test cleanup；Hero 使用普通 local `loanops` MySQL 中独立的 `DEMO_SYNTHETIC` fixture、独立 Qdrant collection，并清理自身 fixture、conversation 和 audit 数据。Local Demo 语料是 synthetic fixture，不是真实银行制度、监管政策或内部文件。
 
 ### 7.1 Terminal Chat
 

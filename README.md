@@ -178,13 +178,19 @@ $env:JAVA_HOME = "C:\path\to\jdk-21"
 
 launcher 只为本次 Maven 进程选择固定的 provider / adapter / model，并默认显式关闭 Policy RAG。项目根目录中 ignored `.env` 仍由 Spring Boot Config Data 自动加载；DeepSeek / GLM API Key 可分别写入本地 `.env` 的 `DEEPSEEK_API_KEY` / `GLM_API_KEY`，无需每次复制到 `$env:...`。launcher 不读取、解析或打印 `.env`。
 
-如需启用完整的现有 Policy RAG profiles，使用 `-WithPolicy`：
+首次在普通本地数据库体验 Policy RAG 时，先显式初始化 synthetic/demo policy。该命令只接受空 Policy store、完整 Local Demo 或可恢复的部分 Local Demo；检测到其他 Policy 数据会拒绝执行，也不会 rebuild Qdrant：
+
+~~~powershell
+./scripts/bootstrap-local-policy.ps1
+~~~
+
+成功后再启用完整的现有 Policy RAG profiles：
 
 ~~~powershell
 ./scripts/run-agent.ps1 -Provider ollama -WithPolicy
 ~~~
 
-该模式要求 MySQL、Qdrant、Ollama/bge-m3、已 ingest 的 policy corpus 和已构建的 vector index 均已就绪；launcher 不负责启动或准备这些依赖，也不会在失败时静默退回无 Policy 模式。
+bootstrap 通过现有 PolicyIngestionService 写入普通 local MySQL，再通过 PolicyIndexRebuilder 重建 application-policy.yml 当前配置的 Qdrant collection。它不会自动启动依赖、不会在应用日常启动时 seed，也不会在失败时静默退回无 Policy 模式。语料明确标记为 `LOCAL_DEMO_SYNTHETIC`，不是真实银行制度、监管政策或内部文件。
 
 Agent 启动后，在另一个 PowerShell 7 终端运行：
 
