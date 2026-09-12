@@ -1,41 +1,52 @@
 # LoanOps Agent 模型 Provider
 
+这份文档回答三个问题：**当前支持哪些 Chat Model、怎么切换，以及为什么换模型不会改变贷款业务规则。**
+
 ## 1. 当前支持
 
-当前 Chat Provider：
+| Chat Provider | Spring AI Adapter | 默认模型 | 当前仓库验收路径 |
+|---|---|---|---|
+| DeepSeek | deepseek | `deepseek-chat` | 6 个 Agent 固定用例 + Policy RAG 端到端测试 |
+| Ollama | ollama | `qwen3:4b` | 6 个 Agent 固定用例 + Policy RAG 端到端测试 |
+| GLM | zhipuai | `glm-5.2` | 6 个 Agent 固定用例 + Policy RAG 端到端测试 |
 
-| Provider | Spring AI Adapter | Model | Tool Calling Baseline | Policy Hero |
-|---|---|---|---|---|
-| DeepSeek | deepseek | `deepseek-chat` | 已验证 | 已验证 |
-| Ollama | ollama | `qwen3:4b` | 已验证 | 已验证 |
-| GLM | zhipuai | `glm-5.2` | 已验证 | 已验证 |
+这里的“已验证”只表示通过当前仓库定义的有限用例，不代表生产稳定率或模型能力排名。
 
-这些状态表示已经通过当前仓库定义的有限回归 Gate，不代表生产稳定率、模型排名或无限场景兼容性。
+## 2. Chat Model 和 BGE-M3 不是一回事
 
-## 2. Chat Model 与 Policy Embedding 分离
-
-项目把两个概念明确分开：
+项目里有两类模型：
 
 ```text
-Chat Provider
-    -> DeepSeek / Ollama(qwen3:4b) / GLM
-    -> 理解问题、Tool Calling、组织回答
+Chat Model
+    DeepSeek / qwen3:4b / GLM
+    负责理解问题、选择 Tool、组织回答
 
-Policy Embedding
-    -> Ollama / bge-m3
-    -> Policy Query / Chunk 向量化
+Embedding Model
+    BGE-M3
+    负责把政策条款和查询转换成向量，供 Qdrant 检索
 ```
 
-因此：
+所以把 Chat Model 从 DeepSeek 换成 GLM，不代表 Policy RAG 也要换 Embedding Model。
 
-- 切换 Chat Provider 不应改变金融业务 Service；
-- 切换 Chat Provider 不应改变 Policy corpus；
-- Chat Provider 使用 DeepSeek / GLM 时，Policy Embedding 仍可以是本地 `bge-m3`；
-- Audit 必须分别记录实际 Chat Provider/model 与 Policy embedding model。
+这两个配置维度彼此独立，Audit 也会分别记录实际 Chat Model 和 Policy Embedding model。
 
-## 3. 配置契约
+## 3. 为什么要支持多个 Chat Model
 
-Chat Provider 通过：
+目的不是简单增加“支持模型数量”，而是验证 Agent 的业务边界是否真的独立于某一个模型。
+
+三个模型使用：
+
+- 同一套 Java 业务规则；
+- 同一组只读 Tools；
+- 同一套贷款演示数据；
+- 同一套 6 个 Agent 测试用例；
+- 同一套 Policy RAG 端到端测试。
+
+如果换一个模型以后金额计算方式也跟着变了，说明架构边界就是错的。
+
+## 4. 配置方式
+
+Chat Model 由下面三项配置：
 
 ```text
 LOANOPS_CHAT_PROVIDER
@@ -43,36 +54,26 @@ LOANOPS_CHAT_ADAPTER
 LOANOPS_CHAT_MODEL
 ```
 
-当前固定映射：
+当前映射：
 
 ```text
-deepseek -> deepseek
-ollama   -> ollama
-glm      -> zhipuai
+deepseek -> deepseek -> deepseek-chat
+ollama   -> ollama   -> qwen3:4b
+glm      -> zhipuai  -> glm-5.2
 ```
 
-默认身份：
-
-```text
-deepseek / deepseek / deepseek-chat
-```
-
-项目根目录的本地 `.env` 通过 Spring Boot Config Data 加载，并保持 gitignored。
-
-Secret：
+DeepSeek / GLM 的 Key：
 
 ```text
 DEEPSEEK_API_KEY
 GLM_API_KEY
 ```
 
-Ollama 默认通过本机服务访问。
+可以放在仓库根目录本地 `.env` 中；该文件保持 gitignored。
 
-命令行 / 系统属性 / 操作系统环境变量仍遵循 Spring Boot 原生配置优先级。
+## 5. 推荐启动方式
 
-## 4. 本地启动
-
-推荐使用仓库 launcher，而不是手工拼 profile 和系统属性：
+不建议手工拼一长串 Spring profile 和系统参数，直接使用仓库 launcher：
 
 ```powershell
 ./scripts/run-agent.ps1 -Provider deepseek
@@ -80,118 +81,51 @@ Ollama 默认通过本机服务访问。
 ./scripts/run-agent.ps1 -Provider glm
 ```
 
-默认 launcher 关闭 Policy RAG。
+默认只启动业务 Agent，不开启 Policy RAG。
 
-启用完整 Policy RAG：
+需要 Policy RAG：
 
 ```powershell
 ./scripts/run-agent.ps1 -Provider deepseek -WithPolicy
 ```
 
-或：
+`ollama` 和 `glm` 同样支持 `-WithPolicy`。
 
-```powershell
-./scripts/run-agent.ps1 -Provider ollama -WithPolicy
-./scripts/run-agent.ps1 -Provider glm -WithPolicy
-```
-
-首次在普通本地 MySQL / Qdrant 体验 Demo Policy 时，先执行：
+首次本地体验 Policy RAG 时，先执行：
 
 ```powershell
 ./scripts/bootstrap-local-policy.ps1
 ```
 
-## 5. DeepSeek
+## 6. 切换模型以后什么不能变
 
-当前身份：
-
-```text
-Provider = deepseek
-Adapter  = deepseek
-Model    = deepseek-chat
-```
-
-需要：
-
-```text
-DEEPSEEK_API_KEY
-```
-
-Provider 负责：
-
-- 自然语言理解；
-- Tool Calling；
-- 基于 Tool / Policy Context 组织回答。
-
-金融事实仍由 Java Service 计算。
-
-## 6. Ollama / qwen3:4b
-
-当前身份：
-
-```text
-Provider = ollama
-Adapter  = ollama
-Model    = qwen3:4b
-```
-
-需要本地 Ollama 可访问并安装：
-
-```powershell
-ollama pull qwen3:4b
-```
-
-历史回归曾观察到本地模型 Tool-choice variance，因此单次 6/6 PASS 只能作为回归证据，不能表述为统计稳定率。
-
-`qwen3:4b` 是 Chat Model；`bge-m3` 是 Embedding Model，两者用途不同。
-
-## 7. GLM / glm-5.2
-
-当前身份：
-
-```text
-Provider = glm
-Adapter  = zhipuai
-Model    = glm-5.2
-```
-
-需要：
-
-```text
-GLM_API_KEY
-```
-
-项目使用 Spring AI 原生 ZhiPuAI adapter，而不是同时维护第二套 OpenAI-compatible GLM adapter。
-
-## 8. Provider 不应该影响什么
-
-切换 Provider 时，原则上不应修改：
+更换 Chat Provider 不应该修改：
 
 - `RepaymentCalculator`；
 - `LoanDiagnosisService`；
 - `LoanStatusService`；
-- `LoanOpsTools` 业务语义；
+- `LoanOpsTools` 的业务含义；
 - `DOMAIN.md`；
-- H2 / MySQL 固定贷款 fixture；
-- REST API 的金融事实；
-- Policy corpus 与适用性规则。
+- 固定贷款数据；
+- REST API 的金额和状态；
+- Policy corpus 和版本适用规则。
 
-Provider 边界只应影响模型 adapter、连接配置与必要的模型参数。
+换模型应该只影响模型 adapter、连接配置和必要的模型参数。
 
-## 9. 验收标准
+## 7. 怎么验证一个新 Provider 真的能用
 
-任何新增 Chat Provider 至少需要复用同一套业务事实，并验证：
+任何新 Provider 至少要用同一套业务事实验证：
 
-1. 当前还款问题选择正确 Tool；
-2. 逾期问题选择正确 Tool；
-3. 结清问题选择正确 Tool；
-4. unknown loan 不编造金额与天数；
-5. 写请求不改变数据库；
-6. stateful follow-up 能解析上下文，同时重新查询当前 Tool；
-7. Audit 能证明实际 Provider/model 和 Tool Calling；
-8. 如果声称支持 Policy RAG，还需要通过同一 Policy Hero。
+1. “本期应该还多少钱”能选对 Tool；
+2. “为什么逾期”能选对 Tool；
+3. “是否已经结清”能选对 Tool；
+4. 查询不存在的贷款时不编造金额和逾期天数；
+5. 用户要求修改贷款状态时不会写数据库；
+6. 多轮追问能识别上一轮贷款，同时重新查询当前状态；
+7. Audit 能证明实际用了哪个 Provider、哪个模型和哪个 Tool；
+8. 如果声称支持 Policy RAG，还要通过同一套真实端到端测试。
 
-统一 runner：
+统一命令：
 
 ```powershell
 ./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
@@ -199,4 +133,4 @@ Provider 边界只应影响模型 adapter、连接配置与必要的模型参数
 ./scripts/evaluate-agent-baseline.ps1 -Provider glm
 ```
 
-更多说明见 [EVALUATION.md](EVALUATION.md)。
+测试为什么这样设计见 [EVALUATION.md](EVALUATION.md)。

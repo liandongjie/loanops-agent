@@ -1,72 +1,71 @@
 # LoanOps Agent 评测
 
-## 1. 为什么需要固定评测
+## 1. 为什么不能只靠“我问了几遍都对”
 
-接入 LLM 后，Tool 选择和自然语言表达存在随机性。
+大模型的 Tool 选择和自然语言表达存在随机性。
 
-因此项目不能只依赖：
+同一个问题今天能选对 Tool，不代表换一个模型以后仍然能选对；一次回答看起来合理，也不代表背后真的调用了正确接口。
 
-> “我手工问了几遍，看起来都对。”
+因此项目固定了 **6 个 Agent 测试问题**，让 DeepSeek、Ollama 和 GLM 都跑同一套用例。这样可以直接检查：
 
-当前使用一套固定的 Provider-neutral Agent baseline，把模型行为与确定性 Java 事实分开验证。
+> 换模型以后，原来已经能做对的事情有没有坏掉？
 
-这套评测不是 Java domain tests 的替代品。
+这套测试主要验证 Agent 行为，不能替代 Java 业务规则测试。金额、日期、逾期和结清的最终事实仍由 Java Service 决定。
 
-金融金额、日期、逾期和结清的最终事实仍由 Java Service 与数据库状态决定。
+## 2. 六个固定测试问题
 
-## 2. 固定测试集
-
-manifest：
+测试定义在：
 
 ```text
 evaluation/agent-baseline-cases.json
 ```
 
-当前包含 6 个 live Agent cases：
-
-| Case | 主要验证 |
+| Case | 实际检查什么 |
 |---|---|
-| `current-repayment-ln10001` | 为 LN-10001 选择 `getCurrentRepayment` 并返回确定性金额事实 |
-| `overdue-diagnosis-ln10002` | 为 LN-10002 选择 `getOverdueDiagnosis` 并返回确定性逾期事实 |
-| `settlement-ln10003` | 为 LN-10003 选择 `getSettlementStatus` 并说明结清结果 |
-| `read-only-write-refusal` | 拒绝写请求，贷款状态不改变 |
-| `stateful-reference-and-fresh-tool` | 从 Conversation 解析 follow-up 指代，并重新调用当前事实 Tool |
-| `unknown-loan-no-hallucination` | unknown loan 的 Tool Audit 按预期失败，同时回答不编造金额 / 天数 |
+| `current-repayment-ln10001` | 问“本期应该还多少钱”时，是否调用 `getCurrentRepayment` 并返回正确金额 |
+| `overdue-diagnosis-ln10002` | 问“为什么逾期”时，是否调用 `getOverdueDiagnosis` 并返回正确逾期事实 |
+| `settlement-ln10003` | 问“是否结清”时，是否调用 `getSettlementStatus` |
+| `read-only-write-refusal` | 用户要求修改贷款状态时，Agent 是否拒绝且数据库不变化 |
+| `stateful-reference-and-fresh-tool` | 下一轮说“他”时能否识别上一轮贷款，同时重新查询当前数据 |
+| `unknown-loan-no-hallucination` | 查询不存在的贷款时，Tool 可以失败，但回答不能编造金额和天数 |
 
-## 3. 如何判定通过
+## 3. 为什么不能只看最终回答文本
 
-Tool selection 不从自然语言答案“猜”，而是从 Agent / Tool Audit 验证。
+例如模型回答：
 
-自然语言只检查稳定事实或允许一定措辞差异，不比较完整字符串。
+```text
+这笔贷款当前逾期 3 天。
+```
 
-一个 case 的 PASS 需要结合：
+文字看起来没问题，但它可能是模型猜出来的，也可能真的调用了 `getOverdueDiagnosis`。
 
-- Agent Audit 状态；
-- Tool Audit 状态；
-- Tool 名称；
-- loan number；
-- Conversation 边界；
-- requested provider/model 与实际 Audit identity；
-- case-specific 稳定事实。
+所以测试不只检查回答，还会看 Agent / Tool Audit，确认：
 
-`unknown-loan-no-hallucination` 中，预期的 `LoanNotFoundException` Tool failure 不是 baseline failure，只要最终回答不编造业务事实。
+- 调用了哪个 Tool；
+- 查询的是哪笔贷款；
+- Tool 成功还是失败；
+- 实际使用了哪个 Provider / Model；
+- Conversation 是否符合预期；
+- 关键金额、日期和状态是否与 Java 业务事实一致。
 
-## 4. 为什么 baseline 可以使用 H2
+自然语言允许措辞变化，不要求完整字符串完全相同。
 
-这套 baseline 的主要目的不是再次证明 MySQL transaction 或 Flyway，而是比较不同 Chat Provider 的 Agent 行为。
+## 4. 为什么 Agent 评测使用 H2
 
-Conversation / MySQL persistence、restart continuity、CAS 等约束由 deterministic integration tests 和 MySQL Gate 覆盖。
+这组测试主要比较“不同模型是否还能正确使用 Agent”，并不是再次验证 MySQL、Flyway 或 Qdrant。
 
-使用固定 H2 fixture 可以：
+因此使用固定 H2 数据有几个好处：
 
-- 保持金融事实稳定；
-- 减少外部依赖；
-- 提高 Provider 回归速度；
-- 避免把数据库波动误判成模型波动。
+- 每次贷款事实一致；
+- 外部依赖更少；
+- 模型回归速度更快；
+- 不会把数据库环境问题误判成模型问题。
 
-## 5. 运行
+MySQL 持久化、Conversation restart、并发提交等能力由各自集成测试和真实端到端测试覆盖。
 
-仅验证 manifest：
+## 5. 怎么运行
+
+先只检查测试定义是否合法：
 
 ```powershell
 ./scripts/evaluate-agent-baseline.ps1 -ValidateOnly
@@ -91,95 +90,89 @@ GLM：
 ./scripts/evaluate-agent-baseline.ps1 -Provider glm
 ```
 
-如果依赖不可用，runner 报告：
+如果 API Key、Ollama 服务或指定模型没有准备好，脚本报告：
 
 ```text
 ENV_BLOCKED
 ```
 
-不得：
+它表示环境阻塞，不是 PASS，也不是业务 FAIL。
 
-- 自动替换成其他模型；
-- 把 skipped 当 PASS；
-- 只根据答案文本宣称 Tool Calling 成功。
+## 6. 为什么固定业务日期
 
-## 6. 固定业务时间
-
-baseline 固定：
+测试固定：
 
 ```text
 business date = 2026-08-23
 business zone = Asia/Shanghai
 ```
 
-这样贷款事实不会因为运行当天日期不同而变化。
+否则同一笔贷款今天跑可能逾期 3 天，下个月跑就变成 30 多天，回归结果没有可比性。
 
-## 7. 报告
+## 7. 测试报告里记录什么
 
-报告输出到 ignored：
+报告保存在：
 
 ```text
 target/evaluation/
 ```
 
-包括：
+其中会记录：
 
 - repository HEAD；
-- requested provider / adapter / model；
-- 实际 Audit provider / model；
-- 固定 business date / zone；
+- 期望使用的 Provider / Model；
+- Audit 里实际使用的 Provider / Model；
+- 固定业务日期；
 - system prompt hash；
 - PASS / FAIL 数量；
 - request / conversation identifier；
-- duration；
-- Tool Audit evidence；
-- failed structured checks。
+- Tool Audit；
+- 哪一项检查失败。
 
-Secret 不进入报告。
+API Key 等 Secret 不进入报告。
 
-## 8. 模型随机性如何处理
+## 8. 怎么看待模型随机性
 
-Agent baseline 是**回归 Gate**，不是统计学模型 benchmark。
+这套 6-case 测试是回归检查，不是统计学意义上的模型 benchmark。
 
-历史 unchanged-config 运行曾出现 Tool-choice variance，尤其本地小模型路径。
+历史上，本地小模型曾出现同样配置下 Tool 选择不一致的情况。因此项目保留这样的失败证据，而不是后面偶尔跑一次 6/6，就反过来说模型“100% 稳定”。
 
-因此：
+所以：
 
-- 保留首次失败证据；
-- 可在完全不改配置时做有限 repeat；
-- 后续一次 6/6 不能抹掉历史失败；
-- 单次 6/6 不等于“100% 稳定”；
-- 当前不使用 LLM-as-a-Judge 把主观语义分数包装成精确事实。
+- 后续 PASS 不删除历史 FAIL；
+- 单次 6/6 只证明这一轮固定用例通过；
+- 不把它包装成模型准确率；
+- 当前也没有用 LLM-as-a-Judge 给主观答案打一个看起来很精确的分数。
 
-## 9. Provider 一致性原则
+## 9. 为什么三个 Provider 必须共用同一套题
 
-DeepSeek、Ollama / qwen3:4b、GLM / glm-5.2 使用同一 manifest。
+如果 DeepSeek 用一套题、Ollama 用另一套更简单的题，那么“都通过”没有比较意义。
 
-新增 Provider 不能通过“给它定制一套更容易的问题”获得已验证状态。
+因此 DeepSeek、Ollama / qwen3:4b、GLM / glm-5.2 统一使用同一个 manifest。
 
-具体 Provider 配置见 [PROVIDERS.md](PROVIDERS.md)。
+新增 Provider 也不能通过为自己定制更容易的问题获得“已验证”状态。
 
-## 10. 与 Policy RAG 评测的关系
+## 10. Agent 评测和 Policy RAG 评测为什么分开
 
-Agent baseline 关注：
+Agent 评测主要问：
 
 ```text
-自然语言
-  -> Tool selection
-  -> deterministic financial facts
-  -> Conversation / refusal / unknown-loan behavior
+问题理解对不对？
+Tool 选对没有？
+贷款事实有没有编？
+多轮对话还能不能正确查当前数据？
 ```
 
-Policy RAG 评测关注：
+Policy RAG 评测主要问：
 
 ```text
-Policy Router
-  -> applicable version
-  -> retrieval
-  -> no-match
-  -> citation
+该不该查政策？
+找到了正确条款没有？
+政策版本对不对？
+没有答案时会不会硬匹配？
+引用是否真实？
 ```
 
-两者不应混成一个模糊的“Agent 准确率”。
+把两者拆开，出问题时才知道应该修 Agent 行为还是 RAG 检索。
 
-Policy RAG 指标见 [POLICY_RAG_EVALUATION.md](POLICY_RAG_EVALUATION.md)。
+Policy RAG 评测见 [POLICY_RAG_EVALUATION.md](POLICY_RAG_EVALUATION.md)。

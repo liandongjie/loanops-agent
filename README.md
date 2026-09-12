@@ -1,25 +1,22 @@
-# LoanOps Agent：面向贷后运营的可审计智能 Agent🤖
+# LoanOps Agent：面向贷后运营的可审计智能 Agent
 
-LoanOps Agent 是一个基于 **Java 21 / Spring Boot / Spring AI** 开发的贷后运营智能 Agent🤖。
+LoanOps Agent 是一个基于 **Java 21 / Spring Boot 3.4.5 / Spring AI 1.1.1** 开发的贷后运营智能 Agent。
 
-它面向“为什么逾期、还欠多少钱、按照规定应该怎么处理”这类问题：金融事实由确定性的 Java 后端服务计算，Agent 通过只读 Tool 查询；政策依据从版本化 Policy 知识库检索，并以 `[P1]`、`[P2]` 的形式给出引用。LLM 负责理解问题、选择工具和组织回答，而不是自行计算金额、日期或贷款状态。
+它想解决一个很具体的问题：传统接口可以返回应还金额、已还金额、到期日等字段，但当用户继续问“为什么逾期”“现在还欠多少”“按照规定应该怎么处理”时，还需要把多项业务数据和政策条款串起来理解。
 
-当前项目已经实现：
+这个项目给这些查询提供一个自然语言入口，但不会把金融计算直接交给大模型：
 
-**Tool Calling → 持久化多轮会话 → Policy RAG → 引用校验 → Audit → SSE 流式对话**
+> **Java 后端负责算清楚金额、日期和贷款状态；Agent 负责理解问题、选择查询工具、检索政策并把结果解释给人。**
 
-> 本仓库中的贷款数据与政策语料均为人为构造的数据，仅用于工程验证，不代表真实银行业务数据、内部制度或监管政策。
+当前项目已经支持 Tool Calling、多轮对话、Policy RAG、政策引用校验、执行审计、SSE 流式响应，以及 DeepSeek、Ollama / Qwen、GLM 三种 Chat Model。
 
-## 项目能做什么
+> 仓库中的贷款数据和政策语料都是人为构造的演示数据，只用于工程验证，不代表真实银行业务数据、内部制度或监管政策。
 
-| 场景 | 示例 | 主要能力 |
-|---|---|---|
-| 贷款事实查询 | `LN-10002 为什么逾期？` | Tool Calling + Java 业务规则 |
-| 多轮追问 | `那他现在还欠多少钱？` | 持久化 Conversation + fresh Tool query |
-| 政策依据查询 | `按照规定现在应该怎么处理？` | Policy Router + RAG + Citation |
-| 条款追问 | `这个规定具体是哪一条？` | Policy Evidence + `[P1]` / `[P2]` |
+## 实际能做什么
 
-### 一次真实手工测试
+下面是一组真实手工测试，可以比技术名词更直观地说明这个 Agent 在做什么。
+
+### 1. 查询为什么逾期
 
 ```text
 You: LN-10002 为什么逾期？
@@ -33,7 +30,9 @@ Agent:
 逾期天数：21 天
 ```
 
-继续在同一个会话中询问：
+这里的大模型没有自己计算金额和逾期天数，而是调用只读 Tool，从 Java 业务服务取得结果。
+
+### 2. 继续问“按照规定怎么办”
 
 ```text
 You: 按照规定现在应该怎么处理？
@@ -48,7 +47,9 @@ Agent:
 结合当前欠款 3500.00、逾期 21 天的业务事实……
 ```
 
-继续追问：
+这一步会先判断问题是否需要政策依据，需要时再从 Policy RAG 中检索相关条款，并把引用写成 `[P1]`、`[P2]`。
+
+### 3. 多轮追问
 
 ```text
 You: 那他现在还欠多少钱？
@@ -57,7 +58,9 @@ Agent:
 LN-10002 当前期剩余欠款为 3500.00。
 ```
 
-以及：
+Agent 能理解“他”仍然指前面讨论的 `LN-10002`。但涉及当前贷款状态时，不会直接相信上一轮回答，而是重新调用 Tool 查询当前数据。
+
+### 4. 继续追问政策条款
 
 ```text
 You: 这个规定具体是哪一条？
@@ -67,22 +70,53 @@ Agent:
 [P2]《金融资产风险分类评测规程》2026 版第十二条
 ```
 
+这组对话串起了项目最核心的能力：**业务查询、连续对话、政策检索和引用校验**。
 
+## 这个 Agent 和“直接把数据丢给大模型”有什么区别
 
-## 核心能力
-
-| 能力 | 当前实现 |
+| 关注点 | LoanOps Agent 的做法 |
 |---|---|
-| 确定性金融事实 | Java Service 使用 `BigDecimal`、`LocalDate`、可注入 `Clock` 计算还款、逾期与结清事实 |
-| 只读 Tool Calling | 3 个 Spring AI Tools：当前还款、逾期诊断、结清状态 |
-| 持久化多轮会话 | USER / ASSISTANT transcript 持久化到 MySQL，支持上下文指代与并发安全提交 |
-| Policy RAG | MySQL 版本化 Policy Store + BGE-M3 Embedding + Qdrant |
-| 政策引用 | `[P1]`、`[P2]` 必须映射到真实检索证据，并通过确定性 Citation Validator |
-| 多模型切换 | DeepSeek、Ollama / qwen3:4b、GLM / glm-5.2 |
-| Audit | Agent、Tool、Policy Retrieval 均保留可关联审计记录 |
-| 流式对话 | Terminal Chat 通过 SSE 接收响应；Policy 回答在引用校验和成功提交后再下发 |
-| 可复现评测 | 固定 Agent baseline、30-case Policy RAG Gold Dataset、真实 Provider Hero E2E |
-| 本地 Policy 初始化 | 显式、幂等、安全的 Demo Policy Bootstrap，不覆盖未知 Policy 数据 |
+| 金额和逾期天数谁来算 | Java Service 计算，大模型只负责解释 |
+| 上一轮回答能不能当最新事实 | 不能。需要当前状态时重新查询 Tool |
+| 政策依据从哪里来 | 政策原文和版本信息保存在 MySQL，Qdrant 负责帮助检索相关条款 |
+| 找不到政策怎么办 | 明确返回无法确认，不让模型自己编一条规定 |
+| 引用会不会乱写 | `[P1]`、`[P2]` 在服务端校验，必须对应真实检索证据 |
+| Agent 能不能改贷款状态 | 不能，当前 Tool 全部只读 |
+| 出问题后能不能追查 | 可以查询 Agent、Tool 和 Policy Retrieval 的审计记录 |
+
+## 核心设计
+
+### 金融计算为什么不用 LLM
+
+应还金额、已还金额、逾期天数都有明确业务规则。如果把这些公式写进 Prompt，同一个问题可能因为模型或上下文变化得到不同结果，也很难做稳定测试。
+
+因此项目把金融规则固定在 Java 领域服务里，金额使用 `BigDecimal`，业务日期通过可注入 `Clock` 获取。普通 REST / Service 测试可以完全绕过 AI 验证这些结果。
+
+### 为什么政策原文放 MySQL，Qdrant 只负责检索
+
+Qdrant 的作用是帮助 Agent 快速找到可能相关的条款，但它不是政策原文的最终依据。
+
+政策正文、版本、生效时间和条款结构保存在 MySQL；Qdrant 保存由这些数据生成的向量索引。即使向量索引丢失，也可以通过 MySQL + BGE-M3 重新生成。
+
+简单说就是：
+
+> **MySQL 保存政策事实，Qdrant 帮忙找条款。**
+
+### 为什么多轮对话不能替代重新查数据库
+
+Conversation 只解决“他”“这笔贷款”“这个规定”分别指什么。
+
+如果用户继续问余额、逾期天数等当前状态，Agent 仍会重新调用 Tool 获取数据，而不是把历史 Assistant 文本当数据库使用。
+
+### 为什么 Agent 只读
+
+当前三个 Tool 只查询：
+
+- 当前应还情况；
+- 逾期原因；
+- 整笔贷款是否结清。
+
+项目没有让 Agent 修改贷款、还款计划或付款记录。金融写操作会额外涉及权限、审批、确认、幂等、补偿和人工复核，不适合在当前项目里为了“功能更多”强行加入。
 
 ## 系统架构
 
@@ -95,91 +129,42 @@ flowchart LR
     S --> L[(贷款数据)]
 
     A --> R[Policy RAG]
-    R --> M[(MySQL Policy Store)]
+    R --> M[(MySQL 政策库)]
     R --> E[BGE-M3]
     E --> Q[(Qdrant)]
-
     R --> C[引用校验]
-    C --> A
 
     A --> O[回答]
     A --> D[Conversation / Audit]
 ```
 
-系统遵循一个核心原则：
+更完整的请求链路、并发提交、Streaming 和失败处理见 [系统架构](docs/ARCHITECTURE.md)。
 
-> **LLM 负责理解与编排，确定性系统负责事实。**
+## 技术栈
 
-金融金额、日期、逾期状态和结清状态不会交给 LLM 自行计算。
+| 层次 | 技术 |
+|---|---|
+| 后端 | Java 21、Spring Boot 3.4.5、Spring AI 1.1.1 |
+| 数据访问 | MyBatis-Plus、Flyway |
+| 业务数据库 | MySQL 8 / H2 |
+| 向量检索 | Qdrant |
+| Embedding | Ollama / BGE-M3 |
+| Chat Model | DeepSeek、Ollama / qwen3:4b、GLM / glm-5.2 |
+| Agent 能力 | Tool Calling、多轮 Conversation、Policy RAG、Citation Validation |
+| 接口 | REST + SSE |
+| 可观测性 | Agent / Tool / Policy Audit、Micrometer / Actuator |
 
-政策方面，MySQL 保存 Policy 文档、版本、有效期与 chunk，是政策事实来源；Qdrant 只保存可以从 MySQL + BGE-M3 重建的派生向量索引。
+## 快速体验
 
-更完整的请求链路、Streaming 提交语义和失败边界见 [系统架构](docs/ARCHITECTURE.md)。
-
-## 为什么这样设计
-
-### 金融事实不交给 LLM
-
-金额与日期是确定性业务事实。把这些规则写进 Prompt，不但难以测试，也可能因为模型或上下文变化得到不同结果。
-
-因此项目保持：
-
-```text
-用户问题
-  ↓
-Agent 选择 Tool
-  ↓
-Java Service 计算事实
-  ↓
-Agent 解释结果
-```
-
-普通 REST / Service 测试可以绕过 AI 独立验证同一业务事实。
-
-### Policy RAG 与贷款事实分开
-
-贷款数据回答：
-
-> 现在发生了什么？
-
-Policy RAG 回答：
-
-> 按照规定应该如何理解？
-
-两类事实来源分别建模、分别审计，避免把业务状态与政策文本混在 Prompt 中交给模型猜测。
-
-### MySQL 是 Policy 事实源，Qdrant 只是索引
-
-Policy 文档、版本、适用日期和 chunk 元数据保存在 MySQL。
-
-Qdrant 中的向量可以重新生成，因此向量数据库不是 Policy 的最终事实来源。
-
-### Agent 保持只读
-
-当前 Agent 没有修改贷款、还款计划或付款记录的 Tool。
-
-金融写操作会引入权限、审批、确认、幂等、补偿和人工复核等新的安全边界，因此本项目首先聚焦于**可审计的只读诊断**。
-
-## 快速开始
-
-完整说明见 [本地运行与验收手册](docs/RUNBOOK.md)。下面只保留最快体验路径。
-
-### 环境要求
-
-- Java 21
-- Maven 3.9+
-- Docker
-- Ollama
-- PowerShell 7
+完整步骤见 [本地运行与验收手册](docs/RUNBOOK.md)。下面只保留最快路径。
 
 ### 1. 启动 MySQL 和 Qdrant
 
 ```powershell
 docker compose up -d mysql qdrant
-docker compose ps
 ```
 
-### 2. 准备 Policy Embedding 模型
+### 2. 准备政策 Embedding 模型
 
 ```powershell
 ollama pull bge-m3
@@ -191,14 +176,6 @@ ollama pull bge-m3
 ./scripts/bootstrap-local-policy.ps1
 ```
 
-成功时会看到类似：
-
-```text
-LOCAL_POLICY_BOOTSTRAP_SUCCESS documents=4 versions=5 chunks=41 indexed=41
-```
-
-Bootstrap 可安全重复执行；如果检测到未知或非 Demo Policy 数据，会在写入和索引重建前拒绝执行。
-
 ### 4. 启动 Agent
 
 DeepSeek：
@@ -207,18 +184,14 @@ DeepSeek：
 ./scripts/run-agent.ps1 -Provider deepseek -WithPolicy
 ```
 
-也可以选择：
+也可以使用：
 
 ```powershell
 ./scripts/run-agent.ps1 -Provider ollama -WithPolicy
 ./scripts/run-agent.ps1 -Provider glm -WithPolicy
 ```
 
-DeepSeek / GLM 的 API Key 可以配置在仓库根目录本地 `.env` 中，参考 `.env.example`。
-
-### 5. 开始聊天
-
-在另一个 PowerShell 终端：
+### 5. 在另一个终端开始聊天
 
 ```powershell
 ./scripts/chat.ps1
@@ -233,106 +206,39 @@ LN-10002 为什么逾期？
 这个规定具体是哪一条？
 ```
 
-Terminal 支持：
+## 怎么证明它不是“只能演示一次”
 
-```text
-/new    开始新的客户端会话
-/id     查看当前 conversationId
-/exit   退出
-```
+项目没有只靠手工问几遍来判断 Agent 是否正确：
 
-## 技术栈
+- Java 业务规则有确定性自动测试；
+- DeepSeek、Ollama 和 GLM 共用同一套 6 个 Agent 测试用例；
+- Policy RAG 使用固定的 30 个测试问题，检查是否找对条款、用对版本、正确处理无答案场景；
+- 另有真实 Chat Model + MySQL + BGE-M3 + Qdrant 的端到端测试；
+- 历史上出现过的模型错误和失败记录会保留，不用后续一次 PASS 覆盖。
 
-| 层次 | 技术 |
-|---|---|
-| 后端 | Java 21、Spring Boot 3.4、Spring AI |
-| 数据访问 | MyBatis-Plus、Flyway |
-| 业务数据库 | MySQL 8 / H2 |
-| 向量数据库 | Qdrant |
-| Embedding | Ollama / BGE-M3 |
-| Chat Model | DeepSeek、Ollama / Qwen、GLM |
-| Agent 能力 | Tool Calling、Conversation、Policy RAG、Citation Validation |
-| 接口 | REST + SSE |
-| 测试与评测 | JUnit、Spring Boot Test、真实 MySQL/Qdrant E2E、固定 Gold Dataset |
-
-## 评测与验收
-
-项目不依赖“手工问几遍感觉不错”来判断 Agent 是否正确，而是分别维护：
-
-- Java / Spring 的确定性自动测试；
-- 6-case Provider-neutral Agent baseline；
-- 30-case Policy RAG Gold Dataset；
-- Policy Router 专项回归集；
-- 真实 Chat Provider + MySQL + BGE-M3 + Qdrant Hero E2E；
-- adversarial review 与 Citation Validator 失败证据。
-
-固定 Policy RAG E2 数据集上的核心指标当前为：
-
-| 指标 | E2 |
-|---|---:|
-| Router Accuracy | 1.0000 |
-| Policy-required Recall | 1.0000 |
-| Exact Reference Accuracy | 1.0000 |
-| No Match Accuracy | 1.0000 |
-| Recall@1 / @3 / @5 | 1.0000 |
-| MRR | 1.0000 |
-| False Match | 0 |
-
-这些数字**只适用于仓库内固定 synthetic corpus 和 Gold Dataset，不代表生产环境准确率**。
-
-详细方法与历史失败案例见：
-
-- [Agent 评测](docs/EVALUATION.md)
-- [Policy RAG 评测](docs/POLICY_RAG_EVALUATION.md)
-- [当前验收标准](docs/ACCEPTANCE.md)
-- [最近一次验收快照](docs/ACCEPTANCE_SNAPSHOT.md)
-
-## 项目结构
-
-```text
-loanops-agent/
-├── src/main/java/com/loanops/
-│   ├── agent/          Agent 编排与模型调用
-│   ├── conversation/   多轮会话持久化
-│   ├── policy/         Policy RAG、引用与政策审计
-│   ├── service/        贷款业务规则与查询
-│   └── tool/           Spring AI 只读 Tools
-│
-├── src/main/resources/
-│   ├── db/migration/   Flyway 数据库迁移
-│   └── policy/         Demo Policy corpus
-│
-├── evaluation/         固定评测集与评测证据
-├── scripts/            启动、验证和评测脚本
-└── docs/               架构、运行、范围和评测文档
-```
+详细方法见 [Agent 评测](docs/EVALUATION.md) 和 [Policy RAG 评测](docs/POLICY_RAG_EVALUATION.md)。固定测试集的结果只用于工程回归，**不代表真实金融生产环境准确率**。
 
 ## 项目边界
 
-当前项目是**可复现的工程验证项目**，不是银行生产系统。
+当前项目是可复现的工程验证项目，不是银行生产系统。
 
-目前明确：
-
-- 贷款数据和政策语料均为人为构造、用于演示和测试的数据；
+- 贷款和政策数据均为人为构造的演示数据；
 - Agent 只有查询和解释能力，没有金融写权限；
-- 未实现完整的客户、授信、放款、催收执行、罚息、提前还款等信贷业务；
-- 未实现生产级 RBAC、OAuth、限流、高可用、云部署或 Secrets Manager；
-- 固定评测集用于工程回归，不代表真实金融生产场景准确率；
-- 未引入 Multi-Agent、MCP、GraphRAG、Reranker 等没有当前需求或评测证据的组件。
+- 没有实现完整的授信、放款、催收执行、罚息、提前还款等信贷业务；
+- 没有实现生产级 RBAC、OAuth、限流、高可用或云部署；
+- 没有为了堆技术栈引入 Multi-Agent、MCP、GraphRAG、Reranker 等当前没有明确需求和评测证据的组件。
 
 完整范围见 [项目范围](docs/SCOPE.md)。
 
-## 文档
+## 进一步了解
 
-第一次阅读建议从 [文档导航](docs/README.md) 开始。
+如果你想继续看实现细节：
 
-- [系统架构](docs/ARCHITECTURE.md)
-- [领域规则](docs/DOMAIN.md)
-- [项目范围](docs/SCOPE.md)
-- [本地运行与验收](docs/RUNBOOK.md)
-- [模型 Provider](docs/PROVIDERS.md)
-- [Agent 评测](docs/EVALUATION.md)
-- [Policy RAG 评测](docs/POLICY_RAG_EVALUATION.md)
-- [当前验收标准](docs/ACCEPTANCE.md)
-- [最近一次验收快照](docs/ACCEPTANCE_SNAPSHOT.md)
-- [历史记录](docs/history/)
+- 想看系统为什么这样设计 → [系统架构](docs/ARCHITECTURE.md)
+- 想看贷款金额、逾期和结清怎么算 → [贷款业务规则](docs/DOMAIN.md)
+- 想在本地跑起来 → [本地运行与验收](docs/RUNBOOK.md)
+- 想看三个模型怎么切换 → [模型 Provider](docs/PROVIDERS.md)
+- 想看 Agent 怎么测试 → [Agent 评测](docs/EVALUATION.md)
+- 想看 RAG 怎么测试 → [Policy RAG 评测](docs/POLICY_RAG_EVALUATION.md)
+- 想看当前范围与限制 → [项目范围](docs/SCOPE.md)
+- 想看完整文档地图 → [文档导航](docs/README.md)
