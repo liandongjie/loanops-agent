@@ -1,291 +1,416 @@
-# Reproducible Validation Runbook
+# LoanOps Agent 本地运行与验收手册
 
-## 1. Evidence Levels
+这份文档用于回答：**怎样把项目跑起来、怎样验证关键能力、常见问题怎么排查。**
 
-三个层次验证不同边界，不应互相替代：
+所有命令默认从仓库根目录使用 **PowerShell 7** 执行。
 
-| Level | Verifies | External dependency |
-|---|---|---|
-| 1. deterministic local | Java domain、H2、REST、Tool adapter、Conversation/Policy runtime tests | Java 21 + Maven |
-| 2. infrastructure | MySQL 8 / Flyway path、Qdrant service、local BGE-M3 availability | Docker + local Ollama |
-| 3. real Provider/Hero E2E | selected Chat Provider + Tool Calling + Conversation + Policy RAG + Citation + Audit | Provider prerequisite + MySQL + Qdrant + Ollama/bge-m3 |
+## 1. 环境要求
 
-所有命令从仓库根目录使用 PowerShell 7。
-
-## 2. Prerequisites
+基础环境：
 
 - JDK 21；
 - Maven 3.9+；
-- Level 2/3：Docker；
-- Level 2/3 Policy：本机 Ollama；
-- Level 3：DeepSeek 需要有效 DEEPSEEK_API_KEY；Ollama 需要本地 qwen3:4b；GLM 需要有效 GLM_API_KEY。
+- PowerShell 7。
 
-先确认实际运行时：
+如果要运行完整 Policy RAG，还需要：
 
-~~~powershell
+- Docker；
+- MySQL 8（Docker Compose）；
+- Qdrant v1.15.4（Docker Compose）；
+- 本机 Ollama；
+- BGE-M3；
+- 对应 Chat Model 的 API Key，或本地 Ollama 模型。
+
+先确认：
+
+```powershell
 java -version
 mvn -version
 docker version
 ollama --version
-~~~
+```
 
-不要降低 pom.xml 的 Java 21 target。若本机有多个 JDK，先把 JAVA_HOME 和 Path 指向真实 JDK 21。
+Maven 必须实际使用 Java 21。
 
-## 3. Level 1 — Deterministic Local Verification
+## 2. 最快体验完整对话
 
-### 3.1 Full H2 verification
+### 2.1 启动 MySQL 和 Qdrant
 
-~~~powershell
-mvn clean verify
-~~~
-
-这条命令不需要 Chat Provider、MySQL、Qdrant 或 Ollama。真实外部 E2E tests 由环境变量 opt-in，默认 skip。
-
-### 3.2 Reproducible loan fixture smoke
-
-~~~powershell
-./scripts/verify-resume-mvp.ps1
-~~~
-
-脚本运行完整 Maven verification、打包应用、以固定业务日期启动临时 JAR，并验证：
-
-- LN-10001：due 8500、未逾期；
-- LN-10002：due 8500、paid 5000、outstanding 3500、逾期 3 天；
-- LN-10003：settled、total outstanding 0。
-
-脚本默认不启用 AI。-WithAi 会运行早期三个 live DeepSeek Tool cases、unknown-loan 和 read-only guard，但它**不覆盖** Policy RAG、Qdrant、BGE-M3、Policy Citation 或两轮 Hero。
-
-## 4. Level 2 — Infrastructure
-
-启动仓库提供的本地基础设施：
-
-~~~powershell
+```powershell
 docker compose up -d mysql qdrant
 docker compose ps
-~~~
+```
 
-- MySQL：mysql:8.0，默认映射 127.0.0.1:3307；
-- Qdrant：qdrant/qdrant:v1.15.4，默认 127.0.0.1:6333；
-- Ollama：由本机安装提供，不新增 Compose container。
+默认地址：
 
-准备 embedding model：
+```text
+MySQL   127.0.0.1:3307
+Qdrant  127.0.0.1:6333
+```
 
-~~~powershell
+Ollama 由本机安装提供，不在 Compose 中。
+
+### 2.2 准备 BGE-M3
+
+```powershell
 ollama pull bge-m3
 ollama list
-~~~
+```
 
-验证 MySQL/Flyway 和确定性 JAR：
+BGE-M3 用于政策文本和查询的 Embedding，不是聊天模型。
 
-~~~powershell
-$env:JAVA_HOME = "C:\path\to\jdk-21"
-./scripts/verify-mysql.ps1
-~~~
+### 2.3 初始化演示 Policy
 
-verify-mysql.ps1 会启动 MySQL、在 mysql Profile 下运行完整测试、启动实际 JAR、验证 LN-10002，并显式检查 Flyway V1-V3。V4-V6 由 Maven 中对应 integration tests 覆盖。
+```powershell
+./scripts/bootstrap-local-policy.ps1
+```
 
-## 5. Level 3 — Real Provider Baseline + Policy Hero E2E
+成功时会看到类似：
 
-### 5.1 Unified six-case baseline
+```text
+LOCAL_POLICY_BOOTSTRAP_SUCCESS documents=4 versions=5 chunks=41 indexed=41
+```
 
-同一个 runner 和 manifest 固定业务日期 `2026-08-23`、时区 `Asia/Shanghai`，并按 Provider 显式传入 provider / adapter / model。Secret 只来自当前进程或安全本地注入，不写入 YAML、日志或报告。
+这个脚本会：
+
+- 把演示 Policy 写入本地 MySQL；
+- 通过现有 Policy ingestion 逻辑处理文档和条款；
+- 用 BGE-M3 生成向量并重建 Qdrant 索引；
+- 重复执行时保持幂等，不产生重复数据；
+- 如果发现不属于当前 Demo 的 Policy 数据，直接拒绝执行，避免覆盖未知数据。
+
+它不会在普通应用启动时自动清库、自动 seed 或自动 rebuild。
+
+### 2.4 启动 Agent
 
 DeepSeek：
 
-~~~powershell
-$env:DEEPSEEK_API_KEY = "your-key"
-./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
-~~~
+```powershell
+./scripts/run-agent.ps1 -Provider deepseek -WithPolicy
+```
 
 Ollama / qwen3:4b：
 
-~~~powershell
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
-ollama pull qwen3:4b
-./scripts/evaluate-agent-baseline.ps1 -Provider ollama
-~~~
+```powershell
+./scripts/run-agent.ps1 -Provider ollama -WithPolicy
+```
 
-GLM / glm-5.2：
+GLM：
 
-~~~powershell
-$env:GLM_API_KEY = "your-key"
-./scripts/evaluate-agent-baseline.ps1 -Provider glm
-~~~
+```powershell
+./scripts/run-agent.ps1 -Provider glm -WithPolicy
+```
 
-缺少当前 Provider 的 key、Ollama 服务或指定 model 时，self-start runner 报告 `ENV_BLOCKED`。不得用其他 model 替代，也不得把普通 chat 或答案文本当作 Tool Calling PASS。`-Model` 只用于显式验收 override；默认冻结身份是：
+DeepSeek / GLM 的 Key 可以放在仓库根目录本地 `.env` 中，参考 `.env.example`。`.env` 保持 gitignored。
 
-~~~text
-deepseek / deepseek / deepseek-chat
-ollama   / ollama   / qwen3:4b
-glm      / zhipuai  / glm-5.2
-~~~
+### 2.5 打开 Terminal Chat
 
-### 5.2 Provider-aware Policy Hero
+新开一个 PowerShell：
 
-先准备共享 Policy 基础设施：
+```powershell
+./scripts/chat.ps1
+```
 
-~~~powershell
-docker compose up -d mysql qdrant
-ollama pull bge-m3
-$env:POLICY_AGENT_REAL_E2E_TEST = "true"
-~~~
+建议按顺序尝试：
 
-每次只选择一组身份，然后运行同一个测试类。
+```text
+LN-10002 为什么逾期？
+按照规定现在应该怎么处理？
+那他现在还欠多少钱？
+这个规定具体是哪一条？
+```
+
+预期行为：
+
+1. 第一问查询 `LN-10002` 的真实业务数据并解释逾期原因；
+2. 第二问检索适用的政策条款，并在回答中给出 `[P1]` 等引用；
+3. 第三问能理解“他”仍然指 `LN-10002`，但会重新查询当前业务数据；
+4. 第四问能继续解释上一轮引用的具体政策条款。
+
+Terminal 命令：
+
+```text
+/new    开始一个新的客户端会话
+/id     查看当前 conversationId
+/exit   退出
+```
+
+## 3. 查看多轮对话是否真的保存到了 MySQL
+
+进入 MySQL：
+
+```powershell
+docker compose exec `
+    -e MYSQL_PWD=loanops_dev `
+    mysql `
+    mysql --default-character-set=utf8mb4 -uloanops loanops
+```
+
+查看数量：
+
+```sql
+SELECT COUNT(*) FROM conversation;
+SELECT COUNT(*) FROM conversation_message;
+```
+
+查看最近消息：
+
+```sql
+SELECT
+    conversation_id,
+    sequence_no,
+    role,
+    content,
+    created_at
+FROM conversation_message
+ORDER BY created_at DESC
+LIMIT 20;
+```
+
+查看指定 Conversation：
+
+```sql
+SELECT
+    sequence_no,
+    role,
+    content,
+    created_at
+FROM conversation_message
+WHERE conversation_id = 'your-conversation-id'
+ORDER BY sequence_no;
+```
+
+MySQL 使用 Docker named volume 保存数据。普通：
+
+```powershell
+docker compose down
+```
+
+会停止容器，但保留 volume。
+
+下面这个命令会删除 volume，不要把它当普通清理命令：
+
+```powershell
+docker compose down -v
+```
+
+## 4. 检查 Policy 数据和 Qdrant
+
+MySQL：
+
+```sql
+SELECT COUNT(*) FROM policy_document;
+SELECT COUNT(*) FROM policy_document_version;
+SELECT COUNT(*) FROM policy_chunk;
+```
+
+当前 Demo corpus 预期：
+
+```text
+documents = 4
+versions  = 5
+chunks    = 41
+```
+
+查看 Qdrant collection：
+
+```powershell
+Invoke-RestMethod http://localhost:6333/collections/loanops_policy_chunks
+```
+
+对于只有几十个向量的小 collection，`indexed_vectors_count=0` 不代表没有向量；应结合 `points_count` 判断实际 point 是否存在。
+
+## 5. 先跑不依赖外部大模型的自动测试
+
+```powershell
+mvn clean verify
+```
+
+这条命令主要验证 Java / Spring / H2 的确定性逻辑，不要求真实 Chat Model、Qdrant 或 Ollama 全部在线。
+
+某些依赖真实外部环境的测试是显式开启的。如果环境不完整而被跳过，不能把“skipped”当成真实端到端测试已通过。
+
+MySQL 集成路径可以单独运行：
+
+```powershell
+./scripts/verify-mysql.ps1
+```
+
+## 6. 三个模型共用同一套 Agent 测试
+
+项目固定了 6 个 Agent 测试问题，让 DeepSeek、Ollama 和 GLM 都跑同一套用例。
 
 DeepSeek：
 
-~~~powershell
-$env:DEEPSEEK_API_KEY = "your-key"
+```powershell
+./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
+```
+
+Ollama：
+
+```powershell
+ollama pull qwen3:4b
+./scripts/evaluate-agent-baseline.ps1 -Provider ollama
+```
+
+GLM：
+
+```powershell
+./scripts/evaluate-agent-baseline.ps1 -Provider glm
+```
+
+如果当前模型、API Key 或 Ollama 服务不可用，脚本会报告：
+
+```text
+ENV_BLOCKED
+```
+
+这表示“环境没准备好”，不是 PASS，也不是 FAIL。
+
+具体测试内容见 [EVALUATION.md](EVALUATION.md)。
+
+## 7. 真实 Policy RAG 端到端测试
+
+这项测试会把真实 MySQL、BGE-M3、Qdrant、Chat Model、Tool、Conversation 和 Audit 串在一起。
+
+先准备：
+
+```powershell
+docker compose up -d mysql qdrant
+ollama pull bge-m3
+$env:POLICY_AGENT_REAL_E2E_TEST = "true"
+```
+
+DeepSeek：
+
+```powershell
 $env:LOANOPS_CHAT_PROVIDER = "deepseek"
 $env:LOANOPS_CHAT_ADAPTER = "deepseek"
 $env:LOANOPS_CHAT_MODEL = "deepseek-chat"
 mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
-~~~
+```
 
-Ollama / qwen3:4b：
+Ollama：
 
-~~~powershell
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
+```powershell
 $env:LOANOPS_CHAT_PROVIDER = "ollama"
 $env:LOANOPS_CHAT_ADAPTER = "ollama"
 $env:LOANOPS_CHAT_MODEL = "qwen3:4b"
 mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
-~~~
+```
 
-GLM / glm-5.2：
+GLM：
 
-~~~powershell
-$env:GLM_API_KEY = "your-key"
+```powershell
 $env:LOANOPS_CHAT_PROVIDER = "glm"
 $env:LOANOPS_CHAT_ADAPTER = "zhipuai"
 $env:LOANOPS_CHAT_MODEL = "glm-5.2"
 mvn "-Dtest=PolicyAgentRealE2EIntegrationTest" test
-~~~
+```
 
-PowerShell 中把 `-Dtest=...` 作为一个带引号参数传给 Maven。测试类通过 `@ActiveProfiles` 启用 mysql、policy、ai，不需要另写 Spring profile。外部环境或 key 缺失时报告 `ENV_BLOCKED`；JUnit skipped 不是 Hero PASS。
+测试重点不是比较完整自然语言，而是检查：
 
-### 5.3 Hero conversation and stable invariants
+- 第一轮是否真的调用逾期 Tool；
+- 金额和逾期事实是否来自 Java；
+- 第二轮能否利用上一轮上下文识别贷款；
+- 是否真的检索到适用政策；
+- 回答中的 `[P1]` 是否对应真实命中条款；
+- Agent、Tool、Policy Audit 是否能够关联起来；
+- Policy Embedding 是否仍然使用 BGE-M3。
 
-Turn 1：
+## 8. Policy RAG 专项评测
 
-~~~text
-LN-10002 为什么逾期？
-~~~
-
-稳定断言：
-
-- Agent Audit SUCCESS；
-- getOverdueDiagnosis(LN-10002) SUCCESS；
-- 金融事实来自 Java Service / Tool；
-- conversation 已创建，成功 turn 被持久化。
-
-Turn 2（复用 Turn 1 的 conversationId）：
-
-~~~text
-按照规定现在应该怎么处理？
-~~~
-
-稳定断言：
-
-- prior USER context 解析 LN-10002；
-- Policy decision = SUPPLEMENTAL；
-- Policy retrieval status = MATCHED；
-- synthetic policy fixture 的适用条款进入 context；
-- P1 映射到命中条款，answer 包含有效 [P1]；
-- retrieval config/query/context/hit/citation 有 Audit；
-- transcript roles 恰为 USER / ASSISTANT / USER / ASSISTANT；
-- Agent Audit identity 等于当前 Provider/model；
-- Policy retrieval embedding_model = bge-m3。
-
-PolicyAgentRealE2EIntegrationTest 会自行清理同名旧 fixture、ingest synthetic policy、由 MySQL canonical chunks 重建隔离 Qdrant collection、调用当前选择的 Chat Provider，并验证 Tool、Conversation、Policy RAG、Citation 和 Audit；AfterEach 清理请求、对话、政策 fixture 和 vector collection。
-
-它不比较完整自然语言输出，也不保证每次 wording 或 Tool 选择相同。单次 PASS 不是稳定率结论。
-
-## 6. Policy RAG Evaluation
-
-Requirements：Java 21、Docker MySQL/Qdrant、Ollama + bge-m3。
-
-~~~powershell
+```powershell
 ./scripts/evaluate-policy-rag.ps1 -Label e0 -Threshold 0.0
 ./scripts/evaluate-policy-rag.ps1 -Label e1 -Threshold 0.60
 ./scripts/evaluate-policy-rag.ps1 -Label e2 -Threshold 0.60
-~~~
+```
 
-脚本创建固定的 loanops_policy_rag_eval MySQL schema 和同名 Qdrant collection，运行 frozen 30-case dataset，并在 finally 中清理两者。
+如果要让 DeepSeek 真实生成答案并做人工复查：
 
-真实 DeepSeek manual review：
-
-~~~powershell
-$env:DEEPSEEK_API_KEY = "your-key"
+```powershell
 ./scripts/evaluate-policy-rag.ps1 -Label e2 -Threshold 0.60 -ManualReview
-~~~
+```
 
-E0/E1/E2 指标仅属于固定 synthetic corpus。历史 mixed-002 generation expansion 和 Phase 8 ADV-04 missing-citation failure 都必须保留，不得用后续一次 PASS 覆盖。
+评测会使用隔离的 MySQL schema 和 Qdrant collection，结束后清理，不会把测试数据混进普通本地 Policy 库。
 
-## 7. Optional Application Start
+指标和 E0 → E1 → E2 的变化见 [POLICY_RAG_EVALUATION.md](POLICY_RAG_EVALUATION.md)。
 
-推荐用本地 launcher 显式选择 Chat Provider；它会验证 Maven 使用 Java 21，并只为本次启动设置 provider / adapter / model：
+## 9. SSE 流式响应
 
-~~~powershell
-./scripts/run-agent.ps1 -Provider ollama
-./scripts/run-agent.ps1 -Provider deepseek
-./scripts/run-agent.ps1 -Provider glm
-~~~
+Terminal 默认调用：
 
-DeepSeek / GLM API Key 可分别放在仓库根目录 ignored `.env` 的 `DEEPSEEK_API_KEY` / `GLM_API_KEY` 中；Spring Boot Config Data 自动加载该文件，不需要每次把 key 复制到当前 PowerShell 环境。launcher 不读取、解析、打印或修改 `.env`。操作系统环境变量仍可作为 Spring Boot 原生高级 override。
+```http
+POST /api/agent/chat/stream
+```
 
-默认 launcher 使用 `ai` profile 并显式设置 `POLICY_RETRIEVAL_ENABLED=false`。首次在普通 local MySQL/Qdrant 上体验 Policy RAG 时，先启动依赖并显式初始化 synthetic/demo corpus：
+同步接口仍然保留：
 
-~~~powershell
-docker compose up -d mysql qdrant
-ollama pull bge-m3
-./scripts/bootstrap-local-policy.ps1
-~~~
+```http
+POST /api/agent/chat
+```
 
-bootstrap 使用 `mysql,policy,local-policy-bootstrap` profiles 和 non-web one-shot Spring 进程。它先读取完整 corpus 并检查 canonical store，再通过现有 PolicyIngestionService ingest，最后通过 PolicyIndexRebuilder 把 MySQL active/indexable chunks 整体写入 application-policy.yml 当前配置的 Qdrant collection。它不直接写 Policy 表、不生成 embedding、不直接 PUT vectors，也不会操作其他 collection。
+不需要政策的回答可以边生成边显示。
 
-允许的已有状态只有：空 store、全部属于当前 `LOCAL_DEMO_SYNTHETIC` corpus，或该 corpus 的部分数据。发现其他或未知 Policy document 时会在任何写入和 rebuild 前拒绝并以非零状态退出；没有 force/reset/delete 选项。MySQL、Ollama/bge-m3、Qdrant、corpus 或 rebuild 失败都会显式失败，修复后可安全重跑。
+需要政策引用的回答会先在服务端完成生成、引用校验和成功提交，再把最终结果发给客户端。这样可以避免客户端已经看到一段政策回答，服务端最后才发现引用是错的。
 
-bootstrap 成功后启用完整的现有 MySQL + Policy + selected Chat runtime：
+只有收到：
 
-~~~powershell
-./scripts/run-agent.ps1 -Provider ollama -WithPolicy
-# deepseek / glm 同样支持 -WithPolicy
-~~~
+```text
+done + committed=true
+```
 
-`-WithPolicy` 选择 `mysql,policy,ai` profiles 并显式设置 `POLICY_RETRIEVAL_ENABLED=true`。日常应用启动不会自动 seed 或 rebuild。Evaluation 使用独立的 `loanops_policy_rag_eval` MySQL database 和 Qdrant collection，并由 runner/test cleanup；Hero 使用普通 local `loanops` MySQL 中独立的 `DEMO_SYNTHETIC` fixture、独立 Qdrant collection，并清理自身 fixture、conversation 和 audit 数据。Local Demo 语料是 synthetic fixture，不是真实银行制度、监管政策或内部文件。
+才表示这一轮在服务端正式保存成功。
 
-### 7.1 Terminal Chat
+## 10. 常见问题
 
-Terminal Chat 不会自动启动后端。先按上文用 launcher 启动 Agent，再在另一个 PowerShell 7 终端运行：
+### Maven 用错了 Java 版本
 
-~~~powershell
-./scripts/chat.ps1
-./scripts/chat.ps1 -BaseUrl "http://127.0.0.1:8080"
-~~~
+```powershell
+java -version
+mvn -version
+```
 
-- `/new`：清空客户端的 current conversation ID，不删除服务端 Conversation；
-- `/id`：显示当前 conversation ID；
-- `/exit`：退出。
+确认 Maven 实际使用 Java 21。
 
-Terminal 默认调用 `POST /api/agent/chat/stream`，使用 SSE 增量读取；原 `POST /api/agent/chat` 继续提供同步完整 JSON response。客户端本地只保存 current conversation ID，不保存或重发 USER/ASSISTANT 历史。Provider identity 仍由运行中服务的 `LOANOPS_CHAT_PROVIDER`、`LOANOPS_CHAT_ADAPTER`、`LOANOPS_CHAT_MODEL` 决定；Terminal 不读取 Provider secret。
+### Policy RAG 没有命中
 
-Streaming 主要改善 perceived latency / TTFT，不保证降低总请求耗时。`NOT_REQUIRED` 回答会真正增量输出；Policy `SUPPLEMENTAL` / `REQUIRED` 回答会在引用校验与 successful-turn atomic commit 后一次性显示。任何 `delta` 在 `done` 前都是 provisional；只有 `done` 且 `committed=true` 才表示服务端提交成功。若收到 `error` 或 stream 在 `done` 前异常结束，Terminal 不更新 current conversation ID。
+依次确认：
 
-## 8. Proxy Note
+```text
+MySQL 中是否已有 Policy document / version / chunk
+Ollama 是否运行
+bge-m3 是否已经安装
+Qdrant 是否健康
+启动 Agent 时是否加了 -WithPolicy
+```
 
-若 PowerShell 可访问 DeepSeek，但 Java 进程超时，可对早期 smoke script 显式传入本机代理：
+### 中文在 mysql CLI 显示成 `????`
 
-~~~powershell
-./scripts/verify-resume-mvp.ps1 -WithAi -ProxyHost 127.0.0.1 -ProxyPort 7890
-~~~
+使用：
 
-脚本只把代理参数传给临时 JVM，不修改系统全局配置。Hero E2E 没有单独代理参数；如环境确需代理，应通过 JVM/环境配置提供，并如实记录。
+```powershell
+mysql --default-character-set=utf8mb4 ...
+```
 
-## 9. Cleanup
+必要时：
 
-~~~powershell
+```sql
+SELECT title, HEX(title) FROM policy_document;
+```
+
+可以区分“终端显示问题”和“数据库里真的存成问号”。
+
+### PowerShell 能访问大模型，但 Java 超时
+
+检查 JVM / 系统代理配置。不要通过改业务逻辑绕过本机网络问题。
+
+## 11. 清理
+
+停止 MySQL 和 Qdrant，同时保留数据：
+
+```powershell
 docker compose down
-~~~
+```
 
-该命令停止容器但保留命名 volumes。不要在常规验收中自动删除 volumes；其中可能包含 Reviewer 的本地数据。
+如果没有明确需求，不要在验收脚本里自动删除 volumes。

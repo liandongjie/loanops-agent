@@ -1,187 +1,178 @@
-﻿# Agent Evaluation Baseline
+# LoanOps Agent 评测
 
-## Purpose
+## 1. 为什么不能只靠“我问了几遍都对”
 
-Phase 7.0 freezes a focused pre-RAG behavior baseline for the current Stateful LoanOps Agent.
-The baseline exists so later changes such as Policy RAG can be compared against the same cases
-instead of being judged only by manual impressions.
+大模型的 Tool 选择和自然语言表达存在随机性。
 
-This evaluation is not a replacement for Java domain tests. Deterministic Java services remain the
-source of truth for repayment, overdue and settlement facts.
+同一个问题今天能选对 Tool，不代表换一个模型以后仍然能选对；一次回答看起来合理，也不代表背后真的调用了正确接口。
 
-## What is evaluated
+因此项目固定了 **6 个 Agent 测试问题**，让 DeepSeek、Ollama 和 GLM 都跑同一套用例。这样可以直接检查：
 
-The committed manifest is:
+> 换模型以后，原来已经能做对的事情有没有坏掉？
+
+这套测试主要验证 Agent 行为，不能替代 Java 业务规则测试。金额、日期、逾期和结清的最终事实仍由 Java Service 决定。
+
+## 2. 六个固定测试问题
+
+测试定义在：
 
 ```text
 evaluation/agent-baseline-cases.json
 ```
 
-It now covers six provider-neutral live Agent cases:
-
-| Case | Primary assertion |
+| Case | 实际检查什么 |
 |---|---|
-| `current-repayment-ln10001` | selects `getCurrentRepayment` for `LN-10001` and returns the deterministic amount fact |
-| `overdue-diagnosis-ln10002` | selects `getOverdueDiagnosis` for `LN-10002` and returns deterministic overdue facts |
-| `settlement-ln10003` | selects `getSettlementStatus` for `LN-10003` and states the settlement result |
-| `read-only-write-refusal` | refuses a write request and leaves the deterministic loan state unchanged |
-| `stateful-reference-and-fresh-tool` | resolves a follow-up reference from conversation history and performs a fresh current-fact Tool query |
-| `unknown-loan-no-hallucination` | records expected failed Tool Audit with `LoanNotFoundException` and rejects fabricated amount/day facts |
+| `current-repayment-ln10001` | 问“本期应该还多少钱”时，是否调用 `getCurrentRepayment` 并返回正确金额 |
+| `overdue-diagnosis-ln10002` | 问“为什么逾期”时，是否调用 `getOverdueDiagnosis` 并返回正确逾期事实 |
+| `settlement-ln10003` | 问“是否结清”时，是否调用 `getSettlementStatus` |
+| `read-only-write-refusal` | 用户要求修改贷款状态时，Agent 是否拒绝且数据库不变化 |
+| `stateful-reference-and-fresh-tool` | 下一轮说“他”时能否识别上一轮贷款，同时重新查询当前数据 |
+| `unknown-loan-no-hallucination` | 查询不存在的贷款时，Tool 可以失败，但回答不能编造金额和天数 |
 
-Tool selection is asserted from Agent Tool Audit, not inferred from the wording of the answer.
-Natural-language answers are checked only for stable required facts or tolerant refusal wording;
-full answer strings are never compared byte-for-byte.
+## 3. 为什么不能只看最终回答文本
 
-Conversation isolation, CAS conflicts, provider/Tool failure semantics and transcript rollback remain
-covered by the existing deterministic Java integration tests. They are not duplicated as live-provider
-cases just to increase the case count.
-
-## Why the live baseline uses H2
-
-The live runner intentionally uses the existing `ai` profile with the normal H2/Flyway synthetic validation data.
-Phase 6 already accepted the Stateful Runtime against real MySQL 8, including restart persistence,
-transactions and CAS behavior. Phase 7.0 measures provider-dependent Agent behavior, so H2 makes the
-baseline faster and more repeatable while preserving the same deterministic seeded financial facts.
-
-Policy RAG must later be compared with the same manifest and fixed business date.
-
-## Validate the manifest without a live Provider
-
-This path does not require an API key or an external provider:
-
-```powershell
-.\scripts\evaluate-agent-baseline.ps1 -ValidateOnly
-```
-
-Expected result:
+例如模型回答：
 
 ```text
-PASS: evaluation manifest is valid (6 cases); provider identity is deepseek/deepseek/deepseek-chat.
+这笔贷款当前逾期 3 天。
 ```
 
-## Run the live baseline
+文字看起来没问题，但它可能是模型猜出来的，也可能真的调用了 `getOverdueDiagnosis`。
 
-Requirements:
+所以测试不只检查回答，还会看 Agent / Tool Audit，确认：
 
-- JDK 21 on the current `PATH`;
-- Maven 3.9+;
-- DeepSeek: `DEEPSEEK_API_KEY` in the current process;
-- Ollama: reachable `OLLAMA_BASE_URL` (default `http://localhost:11434`) and the requested model installed;
-- GLM: `GLM_API_KEY` in the current process.
+- 调用了哪个 Tool；
+- 查询的是哪笔贷款；
+- Tool 成功还是失败；
+- 实际使用了哪个 Provider / Model；
+- Conversation 是否符合预期；
+- 关键金额、日期和状态是否与 Java 业务事实一致。
 
-The same runner freezes the acceptance defaults and permits an explicit `-Model` override:
+自然语言允许措辞变化，不要求完整字符串完全相同。
+
+## 4. 为什么 Agent 评测使用 H2
+
+这组测试主要比较“不同模型是否还能正确使用 Agent”，并不是再次验证 MySQL、Flyway 或 Qdrant。
+
+因此使用固定 H2 数据有几个好处：
+
+- 每次贷款事实一致；
+- 外部依赖更少；
+- 模型回归速度更快；
+- 不会把数据库环境问题误判成模型问题。
+
+MySQL 持久化、Conversation restart、并发提交等能力由各自集成测试和真实端到端测试覆盖。
+
+## 5. 怎么运行
+
+先只检查测试定义是否合法：
 
 ```powershell
-$env:DEEPSEEK_API_KEY = "your-key"
-.\scripts\evaluate-agent-baseline.ps1 -Provider deepseek
-
-$env:OLLAMA_BASE_URL = "http://localhost:11434"
-.\scripts\evaluate-agent-baseline.ps1 -Provider ollama
-
-$env:GLM_API_KEY = "your-key"
-.\scripts\evaluate-agent-baseline.ps1 -Provider glm
+./scripts/evaluate-agent-baseline.ps1 -ValidateOnly
 ```
 
-The default identities are `deepseek/deepseek/deepseek-chat`, `ollama/ollama/qwen3:4b`,
-and `glm/zhipuai/glm-5.2`. The temporary JVM receives provider, adapter and model explicitly.
-
-If an already-started Agent is available, the runner can reuse it without reading the API key from the current shell. This is useful for manual/local verification:
+DeepSeek：
 
 ```powershell
-.\scripts\evaluate-agent-baseline.ps1 `
-  -Port 18080 `
-  -Provider ollama `
-  -UseExistingApp
+./scripts/evaluate-agent-baseline.ps1 -Provider deepseek
 ```
 
-In this mode the runner does not build, start, or stop the application. It only sends evaluation requests and reads the existing Audit APIs.
-If Java needs an HTTP/HTTPS proxy:
+Ollama：
 
 ```powershell
-.\scripts\evaluate-agent-baseline.ps1 `
-  -ProxyHost 127.0.0.1 `
-  -ProxyPort 7890
+ollama pull qwen3:4b
+./scripts/evaluate-agent-baseline.ps1 -Provider ollama
 ```
 
-The runner pins:
+GLM：
+
+```powershell
+./scripts/evaluate-agent-baseline.ps1 -Provider glm
+```
+
+如果 API Key、Ollama 服务或指定模型没有准备好，脚本报告：
+
+```text
+ENV_BLOCKED
+```
+
+它表示环境阻塞，不是 PASS，也不是业务 FAIL。
+
+## 6. 为什么固定业务日期
+
+测试固定：
 
 ```text
 business date = 2026-08-23
 business zone = Asia/Shanghai
 ```
 
-It packages the application, starts a temporary AI process, runs the manifest, queries existing Agent
-Audit endpoints, writes reports, and then stops the temporary process.
+否则同一笔贷款今天跑可能逾期 3 天，下个月跑就变成 30 多天，回归结果没有可比性。
 
-If the selected Provider prerequisite is unavailable, the runner emits `ENV_BLOCKED` rather than reporting PASS.
-Secrets are never written to the report.
+## 7. 测试报告里记录什么
 
-## Reports
-
-Generated reports are written under the ignored directory:
+报告保存在：
 
 ```text
 target/evaluation/
 ```
 
-Each live run produces timestamped JSON and Markdown reports plus `*-latest` copies. Metadata includes:
+其中会记录：
 
-- repository HEAD SHA;
-- requested provider/adapter/model and actual Audit provider/model;
-- fixed business date/zone;
-- system prompt hash observed from Agent Audit;
-- PASS/FAIL case counts;
-- per-case request/conversation identifiers;
-- per-case duration;
-- observed Tool Audit evidence;
-- failed structured checks, if any.
+- repository HEAD；
+- 期望使用的 Provider / Model；
+- Audit 里实际使用的 Provider / Model；
+- 固定业务日期；
+- system prompt hash；
+- PASS / FAIL 数量；
+- request / conversation identifier；
+- Tool Audit；
+- 哪一项检查失败。
 
-A case passes only when Tool Audit status, loan number, Agent Audit status, conversation boundaries,
-requested-vs-actual provider/model identity and case-specific answer checks all pass. The unknown-loan
-case expects a failed Tool Audit with `LoanNotFoundException`; this expected domain failure is not a
-baseline failure when the answer abstains without fabricated facts. The baseline does not claim
-statistical significance from one model run and does not use LLM-as-a-Judge.
+API Key 等 Secret 不进入报告。
 
-Historical unchanged-configuration execution showed Tool-choice variance, including the local
-Ollama/qwen3:4b path. Preserve the first failure and allow at most one unchanged-config repeat when
-the evidence is model selection variance. A later single 6/6 run is a regression artifact, not proof
-of a statistically stable Tool-selection rate.
+## 8. 怎么看待模型随机性
 
-## Interpretation
+这套 6-case 测试是回归检查，不是统计学意义上的模型 benchmark。
 
-The report is an Agent regression artifact, not financial truth. Financial truth remains in the
-Java domain/service layer and its database state.
+历史上，本地小模型曾出现同样配置下 Tool 选择不一致的情况。因此项目保留这样的失败证据，而不是后面偶尔跑一次 6/6，就反过来说模型“100% 稳定”。
 
-The intended sequence is:
+所以：
+
+- 后续 PASS 不删除历史 FAIL；
+- 单次 6/6 只证明这一轮固定用例通过；
+- 不把它包装成模型准确率；
+- 当前也没有用 LLM-as-a-Judge 给主观答案打一个看起来很精确的分数。
+
+## 9. 为什么三个 Provider 必须共用同一套题
+
+如果 DeepSeek 用一套题、Ollama 用另一套更简单的题，那么“都通过”没有比较意义。
+
+因此 DeepSeek、Ollama / qwen3:4b、GLM / glm-5.2 统一使用同一个 manifest。
+
+新增 Provider 也不能通过为自己定制更容易的问题获得“已验证”状态。
+
+## 10. Agent 评测和 Policy RAG 评测为什么分开
+
+Agent 评测主要问：
 
 ```text
-Phase 7.0 pre-RAG baseline
-        -> Policy RAG implementation
-        -> rerun the same baseline
-        -> add RAG-specific retrieval/citation evaluation
+问题理解对不对？
+Tool 选对没有？
+贷款事实有没有编？
+多轮对话还能不能正确查当前数据？
 ```
 
-This makes regressions in Tool selection, factual grounding, stateful context and read-only behavior
-visible when retrieval context is introduced.
+Policy RAG 评测主要问：
 
-## Policy RAG evaluation
+```text
+该不该查政策？
+找到了正确条款没有？
+政策版本对不对？
+没有答案时会不会硬匹配？
+引用是否真实？
+```
 
-Phase 7.4 adds a separate fixed Gold corpus, real BGE-M3/Qdrant evaluation, E0/E1 reports and a
-representative DeepSeek grounding review. Metric definitions and commands are documented in
-`docs/POLICY_RAG_EVALUATION.md`; this does not replace the six-case Agent baseline above.
+把两者拆开，出问题时才知道应该修 Agent 行为还是 RAG 检索。
 
-## Phase 8 Runtime Hardening / Adversarial Review
-
-Phase 8 bounds the current message at 4,000 characters and the model-visible history at both 20
-messages and 12,000 characters, while preserving the full successful transcript. External calls have
-finite timeouts, Spring AI max-attempts is one so automatic retry is disabled, provider and required-policy failures have
-stable failure semantics, and supplemental-policy failures degrade without blocking financial facts.
-
-A real DeepSeek review produced 4/5 semantic passes across five representative adversarial samples.
-In ADV-04, malicious policy evidence suppressed the required `[P1]` citation: the model returned a
-policy conclusion without a citation. The deterministic `PolicyCitationValidator` rejects this response,
-so the observed model-layer failure did not bypass the runtime citation-validation boundary.
-
-This supports defense in depth: prompt instructions are a soft control and citation validation is a
-hard, fail-closed control. It does not establish that prompt injection is solved. DeepSeek behavior
-remains stochastic, and these five samples are a safety sanity check rather than a benchmark or proof.
+Policy RAG 评测见 [POLICY_RAG_EVALUATION.md](POLICY_RAG_EVALUATION.md)。

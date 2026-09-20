@@ -1,202 +1,275 @@
-# Architecture
+# LoanOps Agent 系统架构
 
-## 1. Design Goal
+## 1. 先说结论
 
-LoanOps Agent 的核心是隔离“确定性金融事实”和“概率型语言/政策回答”：
+LoanOps Agent 的核心设计不是“让大模型学会贷款业务”，而是把不同类型的事实交给更适合的系统处理：
 
-- Java 领域服务拥有金额、日期、逾期和结清规则；
-- MySQL 版本化 policy store 拥有政策文档、版本与 chunk metadata；
-- Qdrant 是可从 MySQL 重建的派生向量索引；
-- LLM 只负责理解问题、选择只读 Tool 和基于受控证据组织回答；
-- Citation Validator 与 Audit 提供独立于模型自律的硬边界和证据链。
+- 金额、日期、逾期和结清由 Java 业务服务计算；
+- 大模型负责理解问题、选择 Tool 和组织回答；
+- 政策原文、版本和生效时间保存在 MySQL；
+- Qdrant 只负责帮助找到相关政策条款；
+- 多轮 Conversation 负责理解“他”“这笔贷款”“这个规定”指什么，但不替代重新查询当前业务数据；
+- 引用校验和 Audit 用来检查模型最终用了哪些数据和政策依据。
 
-REST 可以绕过 AI 验证金融事实。Policy RAG 不能修改贷款事实，Conversation 历史也不能替代 fresh Tool query。
+可以把它概括为：
 
-## 2. Current Request Flow
+> **LLM 负责理解和编排，确定性系统负责事实。**
 
-~~~mermaid
+## 2. 一次请求是怎么走的
+
+```mermaid
 flowchart TD
-    Client --> API[Agent API]
-    API --> Snapshot[Conversation Snapshot]
-    Snapshot --> Router[Policy Router]
-    Router --> Decision[Policy Decision]
+    Client[用户 / Terminal] --> API[Agent API]
+    API --> History[读取多轮会话]
+    History --> Router{这个问题需要政策吗?}
 
-    subgraph FinancialFacts[Financial facts trust path]
-        Model[Selected Chat Provider] --> Tools[LoanOpsTools]
-        Tools --> Service[Java deterministic services]
-        Service --> LoanData[(MySQL or H2 loan data)]
-    end
+    Router -->|不需要| Model[Chat Model]
+    Router -->|需要| Policy[检索 Policy]
 
-    subgraph PolicyEvidence[Policy evidence trust path]
-        Decision -->|SUPPLEMENTAL / REQUIRED| Query[Policy Query]
-        Query --> Canonical[(MySQL canonical policy store<br/>applicable versions and chunks)]
-        Canonical --> Exact[Exact-reference candidates]
-        Query --> Embedding[BGE-M3 query embedding]
-        Embedding --> Qdrant[(Qdrant rebuildable derived vector index)]
-        Qdrant --> Semantic[Semantic candidates]
-        Exact --> Merge
-        Semantic --> Merge
-        Merge[Retriever merge / rank / applicability filtering] --> RequiredNoMatch{REQUIRED + NO_MATCH?}
-        RequiredNoMatch -->|Yes| Abstain[Return no-match notice<br/>no model call]
-        RequiredNoMatch -->|No| Context[Grounding Context]
-        Context --> Model
-        Abstain --> Citation
-        Model --> Citation[Policy Citation Validation]
-    end
+    Model --> Tools[只读 Tools]
+    Tools --> Service[Java 业务服务]
+    Service --> LoanDB[(贷款数据)]
 
-    Decision -->|NOT_REQUIRED| Model
-    Citation --> Answer[Answer]
-    Answer --> Commit[Conversation commit]
-    Answer --> Audit[Agent, Tool and Policy Audit]
-~~~
+    Policy --> PolicyDB[(MySQL 政策库)]
+    Policy --> Embed[BGE-M3]
+    Embed --> Qdrant[(Qdrant)]
+    PolicyDB --> Context[可引用的政策上下文]
+    Qdrant --> Context
+    Context --> Model
 
-运行顺序由 LoanOpsAgentService 编排：
+    Model --> Citation[政策引用校验]
+    Citation --> Answer[最终回答]
+    Answer --> Commit[保存成功对话]
+    Answer --> Audit[保存审计记录]
+```
 
-1. 校验当前消息长度；
-2. 创建或读取持久化 Conversation Snapshot；
-3. 写入 Agent Audit STARTED；
-4. PolicyRuntimeService 计算 NOT_REQUIRED / SUPPLEMENTAL / REQUIRED；
-5. 需要政策时构造 query、检索适用版本并建立 Grounding Context；
-6. SpringAiAgentChatGateway 把历史、政策上下文、当前问题和只读 Tools 交给当前选择的 Spring AI ChatModel；
-7. PolicyCitationValidator 校验回答中的引用；
-8. 在同一完成事务中追加 USER / ASSISTANT，并将 Agent Audit 标记为 SUCCESS。
+运行时大致经历：
 
-任何 Provider、Tool、必要政策检索、Citation 或 Conversation commit 失败，都不会留下伪成功 turn。
+1. 检查用户输入是否合法；
+2. 创建或读取 Conversation；
+3. 判断问题是否需要 Policy RAG；
+4. 如果需要政策，先构造查询并找到当前业务日期下适用的条款；
+5. 把多轮上下文、政策证据、当前问题和只读 Tools 交给 Chat Model；
+6. 如果回答用了政策，再检查 `[P1]`、`[P2]` 是否真的对应本次检索结果；
+7. 全部成功后，才把 USER / ASSISTANT 两条消息保存到 Conversation，并完成 Audit。
 
-## 3. Two Trust Paths
+如果模型、Tool、必要的政策检索、引用校验或最终保存失败，这一轮不会被记录成“成功对话”。
 
-### 3.1 Financial Facts
+## 3. 金融事实：为什么一定经过 Java Service
 
-~~~text
-Selected Chat Provider Tool Calling
+调用链：
+
+```text
+Chat Model
   -> LoanOpsTools
-  -> LoanStatusService
-  -> LoanDiagnosisService
+  -> LoanStatusService / LoanDiagnosisService
   -> RepaymentCalculator
-  -> MySQL / H2 loan data
-~~~
+  -> MySQL / H2
+```
 
-RepaymentCalculator 使用 BigDecimal；LoanDiagnosisService 使用注入的 Clock。金额、日期、当前期次、逾期和结清不出现在 Prompt 算法中，也不由 Tool 重新实现。
+当前三个 Tool：
 
-三个 Tool 均只读：
+```text
+getCurrentRepayment
+getOverdueDiagnosis
+getSettlementStatus
+```
 
-- getCurrentRepayment
-- getOverdueDiagnosis
-- getSettlementStatus
+它们只做查询和转发，不在 Tool 里重新实现业务公式。
 
-如果 REST 与 Agent 输出冲突，先用 REST / Service 测试核对 Java 事实，再检查 Tool 选择或模型表达。
+业务规则包括：
 
-### 3.2 Policy Evidence
+- 金额使用 `BigDecimal`；
+- 业务日期通过可注入 `Clock` 获取；
+- Prompt 不负责计算贷款金额；
+- 当前状态必须来自当前数据库和 Tool，而不是历史 Assistant 文本。
 
-~~~text
-Policy Router
-  -> Policy Query
-  -> MySQL applicable versions / chunks
-       -> exact-reference candidates
-  -> BGE-M3 query embedding
-       -> Qdrant semantic candidates
-  -> merge / rank with applicable-chunk filtering
-  -> Grounding Context
-  -> Selected Chat Provider
-  -> PolicyCitationValidator
-  -> Answer
-~~~
+例如用户先问：
 
-PolicyRetrievalDecisionEngine 是 deterministic Router：
+```text
+LN-10002 为什么逾期？
+```
 
-- NOT_REQUIRED：纯金融事实问题不运行政策检索；
-- SUPPLEMENTAL：贷款事实和政策依据需要组合；
-- REQUIRED：纯政策问题必须取得足够依据，否则 fail closed 或明确 abstain。
+之后再问：
 
-PolicyRetriever 先从 MySQL 取得业务日期适用的版本和 chunks，再合并 exact-reference 与 Qdrant dense retrieval。Qdrant 命中只有能映射回适用 MySQL chunk 时才可进入结果。
+```text
+那他现在还欠多少钱？
+```
 
-PolicyIngestionService 将规范化文本、内容 hash、版本有效期和结构化 chunks 写入 MySQL。PolicyIndexRebuilder 从 MySQL 读取当前可索引 chunks，经 BGE-M3 生成 embeddings 后整体替换 Qdrant collection。因此：
+Conversation 可以帮助系统知道“他”指 `LN-10002`，但余额仍然会重新调用 Tool 查询。
 
-- **MySQL = canonical policy store / source of truth**
-- **Qdrant = rebuildable derived vector index**
+完整规则见 [DOMAIN.md](DOMAIN.md)。
 
-Policy Context 是不可信证据数据，不是系统指令。需要政策引用时，PolicyCitationValidator 拒绝缺失或未知 [Pn] 的回答。
+## 4. Policy RAG：先判断需不需要政策，再决定是否检索
 
-## 4. Streaming Delivery Contract
+不是每个问题都需要查政策。
 
-现有 `POST /api/agent/chat` 保持同步 JSON contract；新增 `POST /api/agent/chat/stream` 在同一 Spring MVC / Tomcat 应用中返回 SSE，没有第二套 Agent 或 Provider adapter。两条路径仍共用 `LoanOpsAgentService -> AgentChatGateway -> SpringAiAgentChatGateway -> configured ChatModel`，Spring AI 原生 streaming 继续负责 Tool Calling。
+例如：
 
-SSE 事件只有 `start`、`delta`、`done`、`error`。纯金融 `NOT_REQUIRED` turn 使用 `STREAMING` delivery mode，模型 chunk 可作为 provisional delta 立即下发，同时在服务端聚合完整 answer；Policy `SUPPLEMENTAL` / `REQUIRED` 使用 `BUFFERED_POLICY`，draft 在服务端缓冲，只有 PolicyCitationValidator 和 successful-turn atomic commit 均成功后才下发完整安全 answer。REQUIRED + NO_MATCH 仍跳过模型并提交 deterministic notice。
+```text
+LN-10002 还欠多少钱？
+```
 
-`done(committed=true)` 是客户端认定成功的唯一标志。Provider、Tool、Citation 或 optimistic CAS 失败会发 `error(committed=false)`，不发 `done`；在失败前已经显示的非 Policy delta 不会进入成功 transcript。如果在 successful-turn commit 开始前观察到 subscription cancel，Agent Audit 以 FAILED 结束且不追加成功 turn。如果 cancellation 或 network loss 与服务端 commit 并发，或发生在 commit 开始后，服务端 turn 仍可能已经提交，即使客户端未收到最终 `done`；此时客户端将 commit 状态视为 unknown。AgentRequestAuditContext 与 MDC requestId 通过 Micrometer Context Propagation 和 Reactor Context 跨线程恢复，使 streaming Tool Audit 继续使用相同 requestId 和递增 sequence。
+只需要业务数据；而：
 
-Streaming 改善 perceived latency / TTFT，不保证降低总响应耗时。Policy path 有意 buffer，因此不能声称所有回答都做 token streaming。
+```text
+按照规定现在应该怎么处理？
+```
 
-## 5. Conversation Runtime
+需要政策依据。
 
-Conversation 使用 Flyway V4 的 conversation / conversation_message 表持久化。
+代码里 Policy Router 把问题分为三类：
 
-- transcript 只保存成功的 USER / ASSISTANT；
-- Tool messages 和 Policy Context 不写入 transcript；
-- 历史用于指代消解，不能成为当前金融事实来源；
-- 完整成功 transcript 留存，但模型可见窗口最多 20 条消息、12,000 字符，并保留完整 turn；
-- append 使用 version + last_message_sequence optimistic CAS，避免并发 turn 覆盖；
-- AgentTurnCompletionService 在一个事务中完成 transcript append 与 Agent SUCCESS audit。
+- `NOT_REQUIRED`：不需要政策，直接走业务查询 / 模型回答；
+- `SUPPLEMENTAL`：需要把业务事实和政策依据结合起来；
+- `REQUIRED`：必须有政策依据才能回答。
 
-Hero 第二轮从 prior USER 内容恢复 LN-10002，而不是依赖 Assistant 输出。
+如果属于 `REQUIRED`，但知识库里没有找到可靠依据，系统会明确返回无法确认，而不是让模型自己编一条规定。
 
-## 6. Data and Migrations
+## 5. MySQL 和 Qdrant 分别负责什么
 
-Flyway 是数据库结构的唯一版本来源：
+政策原文、版本、生效时间和条款结构保存在 MySQL。
 
-| Migration | Responsibility |
+Qdrant 保存 BGE-M3 生成的向量，作用是快速找到可能相关的条款。
+
+因此：
+
+```text
+MySQL  = 政策事实来源
+Qdrant = 检索索引
+```
+
+一次向量命中只有能够映射回当前适用的 MySQL policy chunk，才允许进入给模型的上下文。
+
+如果 Qdrant 的索引丢失，可以从 MySQL 重新读取条款、用 BGE-M3 重新生成向量并重建索引。
+
+## 6. 为什么政策文本不能变成系统指令
+
+检索到的政策文本只是外部数据，不应该因为进入 Prompt 就获得“系统指令”的权限。
+
+因此 Policy Context 只作为证据使用。
+
+如果一个回答应该引用政策，服务端的 `PolicyCitationValidator` 会检查回答里的 `[P1]`、`[P2]` 是否真的来自本轮检索结果。引用不存在或缺失时，这一轮不能按成功提交。
+
+这条边界不能解决所有模型幻觉，但可以阻止“引用了一个根本没有检索到的条款”被当成成功回答。
+
+## 7. 多轮会话怎么保存
+
+Conversation 使用 MySQL 的：
+
+```text
+conversation
+conversation_message
+```
+
+保存成功的 USER / ASSISTANT 消息。
+
+设计上有几条重要约束：
+
+- Tool 调用记录和 Policy Context 不混进聊天记录；
+- 历史消息只帮助理解上下文，不作为当前金融事实；
+- 给模型的历史有消息数和字符数上限；
+- 两个请求同时写同一会话时，通过 optimistic CAS（乐观并发控制）避免后一个请求把前一个请求直接覆盖；
+- 只有回答和 Agent Audit 都成功，才提交这一轮聊天记录。
+
+## 8. SSE 流式响应为什么分两种情况
+
+项目同时提供：
+
+```http
+POST /api/agent/chat
+POST /api/agent/chat/stream
+```
+
+两条接口复用同一套 Agent 逻辑。
+
+### 不需要政策的回答
+
+这类回答可以边生成边通过 SSE 发送 `delta`，降低用户等待第一段文字的时间。
+
+### 需要政策引用的回答
+
+这类回答要先等模型生成完成，再校验引用并确认本轮 Conversation 已成功提交，之后才把最终安全结果发给客户端。
+
+原因很简单：如果一边把文字发出去，一边最后才发现 `[P1]` 是错的，客户端已经看到了不可信内容。
+
+SSE 事件包括：
+
+```text
+start
+delta
+done
+error
+```
+
+只有收到：
+
+```text
+done
+committed=true
+```
+
+才能认为这一轮已经在服务端正式提交。之前看到的增量文字都只是临时展示。
+
+## 9. Audit 记录什么
+
+项目把审计拆成三类：
+
+- **Agent Audit**：哪次请求、哪个 Conversation、用了哪个 Provider / Model、最终成功还是失败；
+- **Tool Audit**：调用了哪个 Tool、查询哪笔贷款、耗时和结果；
+- **Policy Audit**：为什么要检索政策、用了哪个 Embedding model、查了哪个 Qdrant collection、命中了哪些条款、最终引用了哪条。
+
+默认更关注结构化元数据和 SHA-256 fingerprint，而不是无限制保存完整 Prompt / Answer 原文。
+
+当前 Audit 查询接口只用于本地验证，没有 RBAC，因此不能直接当生产接口使用。
+
+## 10. 数据库迁移
+
+Flyway 负责数据库结构版本：
+
+| Migration | 主要内容 |
 |---|---|
-| V1 | loan_contract、repayment_plan、payment_record |
-| V2 | LN-10001 / LN-10002 / LN-10003 synthetic validation fixture |
-| V3 | agent_audit_log、agent_tool_audit_log |
-| V4 | conversation、conversation_message 与 Agent/Conversation 关联 |
-| V5 | policy_document、policy_document_version、policy_chunk |
-| V6 | policy_retrieval_audit、policy_retrieval_hit |
+| V1 | 贷款合同、还款计划、付款记录 |
+| V2 | LN-10001 / LN-10002 / LN-10003 演示数据 |
+| V3 | Agent / Tool Audit |
+| V4 | Conversation |
+| V5 | Policy document / version / chunk |
+| V6 | Policy Retrieval / Hit Audit |
 
-H2 是默认快速开发/测试路径；MySQL 8 是本地集成、Policy RAG 和 Hero E2E 路径。两者共享 MyBatis-Plus 和 Flyway migration。
+H2 主要用于快速自动测试；MySQL 8 用于本地集成、Policy RAG 和真实端到端测试。
 
-V2 loan data、Policy RAG evaluation corpus 和 Hero policy 都是 synthetic validation fixture，不代表真实银行数据或完整法规。
+## 11. 失败时怎么处理
 
-## 7. Audit and Observability
+当前运行时限制：
 
-Audit 与运行时 Observability 分层：
+```text
+单条用户消息        <= 4,000 characters
+给模型的历史消息    <= 20 messages / 12,000 characters
+HTTP connect timeout = 5s
+HTTP read timeout    = 60s
+Spring AI max-attempts = 1
+```
 
-- Agent Audit：request、conversation、history/system-prompt fingerprint、SUCCESS/FAILED；
-- Tool Audit：Tool 顺序、名称、loan number、耗时和技术结果；
-- Policy Audit：decision、status、as-of date、query/context/config hash、embedding model、collection、hits 与 cited_in_answer；
-- Micrometer / Actuator：低基数运行指标和 health/info/prometheus。
+另外保持：
 
-Audit STARTED 在远程调用前独立提交，模型调用不包在长数据库事务中。默认 loanops.audit.include-content=false，只保存长度与 SHA-256 指纹；SHA-256 不是匿名化。Spring AI prompt、completion、Tool content observations 默认关闭。
+- 历史截断不会切掉半个完整 turn；
+- 必须依赖政策的问题在检索失败时不会静默变成“无政策也回答成功”；
+- 只是辅助政策检索失败时，不会覆盖已经查询成功的贷款事实；
+- 错误或缺失的政策引用不能进入成功 transcript；
+- Agent 没有写操作 Tool；
+- 并发提交冲突会失败，而不是直接覆盖别人的会话更新。
 
-AgentRequestCorrelationFilter 在 JSON 反序列化前生成服务端 UUID，并写入 X-Request-Id、request attribute 和 MDC。客户端传入的 request id 不受信任。
+## 12. 为什么没有继续加 Multi-Agent / MCP / GraphRAG
 
-当前 GET /api/agent/audits/{requestId} 没有 RBAC，只是本地验证接口，不是生产暴露方案。
+当前项目已经能完成目标场景，没有足够需求或评测证据证明下面这些组件现在值得加入：
 
-## 8. Runtime Failure Semantics
+- Multi-Agent；
+- MCP；
+- Redis long-term memory；
+- Hybrid Search / BM25 / RRF / Reranker；
+- GraphRAG / HyDE；
+- 写操作 Tool。
 
-- 当前消息最大 4,000 字符；
-- 模型可见历史最多 20 条消息和 12,000 字符；
-- HTTP connect/read timeout 默认 5s / 60s；
-- Spring AI max-attempts = 1，不进行自动重试；
-- REQUIRED 检索不可用时请求失败；
-- REQUIRED + NO_MATCH 不调用模型生成政策结论；
-- SUPPLEMENTAL 检索失败或无命中时，金融回答可继续，但必须带政策不可用/不足提示；
-- Provider 异常映射为稳定的 AgentProviderUnavailableException；
-- Citation Validation 失败和 Conversation CAS 冲突均阻止成功提交。
+项目更关心“现有链路是否正确、可验证、能解释”，而不是技术名词越多越好。
 
-这些边界降低失败放大和错误落盘风险，但不代表完整生产韧性；当前没有 provider fallback、circuit breaker、RBAC 或 rate limiting。
-
-## 9. Provider Boundary
-
-Agent 通过 Spring AI ChatClient 使用当前选择的 ChatModel，业务类不调用厂商 SDK。DeepSeek/deepseek-chat、Ollama/qwen3:4b 和 GLM/glm-5.2 已复用同一 Gateway 完成真实 Tool Calling 与 Hero E2E。
-
-固定映射为 deepseek -> deepseek、ollama -> ollama、glm -> zhipuai；Qwen 的当前运行身份是 ollama/qwen3:4b。任何 Provider 变化都不得修改 RepaymentCalculator、LoanDiagnosisService、LoanOpsTools 的业务语义或数据库事实。
-
-## 10. Deliberate Non-goals
-
-- Multi-Agent：没有自然角色分解；
-- MCP：现有 Tools 都是本地 Java 能力，没有跨进程/跨应用共享需求；
-- long-term Agent Memory：陈旧状态不能成为金融事实来源；
-- Hybrid Search / Reranker：E1 后固定 corpus 未显示排序瓶颈；
-- write Tools：权限、确认、幂等、恢复和人工批准尚未设计；
-- frontend、Kubernetes、cloud deployment：不属于当前可复现工程收口目标。
+当前范围见 [SCOPE.md](SCOPE.md)。
